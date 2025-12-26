@@ -1,0 +1,948 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Linking, Platform, Animated, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import MapView, { Marker, Polyline as MapPolyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import Svg, { Path, Circle, Polyline as SvgPolyline } from 'react-native-svg';
+import { io, Socket } from 'socket.io-client';
+import { api } from '../../../services/core/api';
+import { colors } from '../../../theme/colors';
+import { spacing } from '../../../theme/spacing';
+import { MonoText } from '../../../components/shared/MonoText';
+import { useAuthStore } from '../../../store/authStore';
+import { orderService } from '../../../services/customer/order.service';
+import { invoiceService } from '../../../services/customer/invoice.service';
+import { ENV } from '../../../utils/env';
+import { logger } from '../../../utils/logger';
+
+const { width, height } = Dimensions.get('window');
+const MAP_HEIGHT_EXPANDED = height * 0.6;
+const MAP_HEIGHT_COLLAPSED = height * 0.3;
+
+type OrderTrackingRouteParams = {
+    orderId: string;
+};
+
+export const OrderTrackingScreen = () => {
+    const navigation = useNavigation<any>();
+    const route = useRoute<RouteProp<{ params: OrderTrackingRouteParams }, 'params'>>();
+    const { orderId } = route.params;
+    const { user } = useAuthStore();
+
+    const [loading, setLoading] = useState(true);
+    const [order, setOrder] = useState<any>(null);
+    const [partnerLocation, setPartnerLocation] = useState<{ latitude: number, longitude: number } | null>(null);
+    const [routeData, setRouteData] = useState<{ distance: string; duration: string } | null>(null);
+    const [status, setStatus] = useState<string>('confirmed'); // pending, confirmed, preparing, out_for_delivery, delivered, cancelled
+
+    const mapRef = useRef<MapView>(null);
+    const socketRef = useRef<Socket | null>(null);
+    const partnerMarkerRef = useRef<any>(null);
+    const scrollY = useRef(new Animated.Value(0)).current;
+
+    // Derived State
+    const isActiveOrder = ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'accepted', 'in-progress', 'awaitconfirmation'].includes(status);
+    const isPastOrder = ['delivered', 'cancelled'].includes(status);
+
+    // Animated map height based on scroll
+    const mapHeight = scrollY.interpolate({
+        inputRange: [0, 150],
+        outputRange: [MAP_HEIGHT_EXPANDED, MAP_HEIGHT_COLLAPSED],
+        extrapolate: 'clamp',
+    });
+
+    // Initial Fetch
+    useEffect(() => {
+        const fetchOrderDetails = async () => {
+            try {
+                const response = await api.get(`/orders/${orderId}`);
+                if (response.data && response.data.order) {
+                    setOrder(response.data.order);
+                    setStatus(response.data.order.status || 'confirmed');
+
+                    // If order is active and we have a partner, set initial location
+                    if (response.data.order.deliveryPersonLocation) {
+                        setPartnerLocation({
+                            latitude: response.data.order.deliveryPersonLocation.latitude,
+                            longitude: response.data.order.deliveryPersonLocation.longitude
+                        });
+                    }
+                }
+            } catch (error) {
+                logger.error('Fetch order error', error);
+                Alert.alert("Error", "Could not fetch order details");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchOrderDetails();
+    }, [orderId]);
+
+    // Socket Connection (Only for active orders)
+    useEffect(() => {
+        if (!orderId || isPastOrder) return;
+
+        socketRef.current = io(ENV.SOCKET_URL, {
+            transports: ['websocket'],
+        });
+
+        const socket = socketRef.current;
+
+        socket.on('connect', () => {
+            logger.socket('connected for tracking');
+            socket.emit('joinRoom', orderId);
+        });
+
+        socket.on('driverLocation', (data: { latitude: number, longitude: number }) => {
+            logger.log('Driver location update (legacy):', data);
+            if (partnerMarkerRef.current) {
+                partnerMarkerRef.current.animateMarkerToCoordinate(data, 2000);
+            }
+            setPartnerLocation({ latitude: data.latitude, longitude: data.longitude });
+        });
+
+        socket.on('deliveryPartnerLocationUpdate', (data: any) => {
+            logger.log('Enhanced delivery location update:', data);
+            if (data.location) {
+                if (partnerMarkerRef.current) {
+                    partnerMarkerRef.current.animateMarkerToCoordinate(data.location, 2000);
+                }
+                setPartnerLocation(data.location);
+                if (data.eta !== undefined) {
+                    setRouteData(prev => ({
+                        distance: data.routeData?.distance?.text || prev?.distance || '--',
+                        duration: data.eta ? `${data.eta} mins` : (data.routeData?.duration?.text || prev?.duration || '--')
+                    }));
+                }
+            }
+        });
+
+        socket.on('orderPickedUp', (data: any) => {
+            logger.log('Order picked up:', data._id);
+            setStatus('out_for_delivery');
+            if (data.deliveryPersonLocation) {
+                setPartnerLocation(data.deliveryPersonLocation);
+            }
+        });
+
+        socket.on('orderUpdated', (data: any) => {
+            logger.log('Order status update:', data);
+            if (data.status) {
+                setStatus(data.status);
+                // If becomes delivered, refetch or update state to past order mode
+                if (['delivered', 'cancelled'].includes(data.status)) {
+                    setOrder(data); // Assuming full payload or refetch
+                }
+            }
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [orderId, isPastOrder]);
+
+    // Fit Map Markers
+    useEffect(() => {
+        if (order && mapRef.current) {
+            const markers = [];
+
+            // User Location (Prioritize deliveryLocation from new API structure)
+            const userLoc = order.deliveryLocation || order.shippingAddress;
+            if (userLoc?.latitude) {
+                markers.push({
+                    latitude: userLoc.latitude,
+                    longitude: userLoc.longitude
+                });
+            }
+
+            // Partner Location (if active)
+            if (partnerLocation) {
+                markers.push(partnerLocation);
+            }
+
+            // Branch Location
+            if (order.pickupLocation?.latitude) {
+                markers.push({
+                    latitude: order.pickupLocation.latitude,
+                    longitude: order.pickupLocation.longitude
+                });
+            }
+
+            if (markers.length > 0) {
+                mapRef.current.fitToCoordinates(markers, {
+                    edgePadding: { top: 100, right: 50, bottom: 50, left: 50 },
+                    animated: true,
+                });
+            }
+        }
+    }, [partnerLocation, order]);
+
+    // Fetch route data for ETA
+    useEffect(() => {
+        const fetchRouteData = async () => {
+            if (!order) return;
+
+            const customerLocation = order.deliveryLocation || order.shippingAddress;
+            if (!customerLocation?.latitude) return;
+
+            // Determine Origin based on status
+            // Logic: 
+            // - If 'out_for_delivery', use Partner Live Location (if available)
+            // - Else (confirmed, preparing, etc.), use Branch Location
+            let originLocation = null;
+            let originAddress = '';
+
+            const isOutForDelivery = status === 'out_for_delivery' || status === 'reaching' || status === 'awaiting_confirmation';
+
+            if (isOutForDelivery && partnerLocation) {
+                originLocation = partnerLocation;
+                originAddress = 'Partner Location';
+            } else if (order.pickupLocation && order.pickupLocation.latitude) {
+                originLocation = {
+                    latitude: order.pickupLocation.latitude,
+                    longitude: order.pickupLocation.longitude
+                };
+                originAddress = order.pickupLocation.address || 'Branch Location';
+            }
+
+            // If no origin available (e.g. no branch loc and no partner loc), skip
+            if (!originLocation) return;
+
+            try {
+                // Use customer-accessible endpoint
+                const response = await api.post(`/orders/${orderId}/directions/customer`, {
+                    origin: {
+                        latitude: originLocation.latitude,
+                        longitude: originLocation.longitude,
+                        address: originAddress
+                    },
+                    destination: {
+                        latitude: customerLocation.latitude,
+                        longitude: customerLocation.longitude,
+                        address: customerLocation.address || 'Customer Location'
+                    },
+                    routeType: isOutForDelivery ? 'partner-to-customer' : 'branch-to-customer',
+                    updateOrder: false
+                });
+
+                if (response.data?.routeData) {
+                    const { distance, duration } = response.data.routeData;
+                    setRouteData({
+                        distance: distance?.text || '--',
+                        duration: duration?.text || '--'
+                    });
+                }
+            } catch (error) {
+                logger.error('Failed to fetch route data:', error);
+
+                // Fallback Distance Calc
+                const originLat = originLocation.latitude;
+                const originLng = originLocation.longitude;
+                const customerLat = customerLocation.latitude;
+                const customerLng = customerLocation.longitude;
+
+                const distKm = Math.sqrt(
+                    Math.pow((originLat - customerLat) * 111, 2) +
+                    Math.pow((originLng - customerLng) * 111 * Math.cos(originLat * Math.PI / 180), 2)
+                );
+                const etaMins = Math.round(distKm * 3); // Assume ~20 km/h average speed in city
+
+                setRouteData({
+                    distance: `${distKm.toFixed(1)} km`,
+                    duration: `${etaMins} mins`
+                });
+            }
+        };
+
+        fetchRouteData();
+    }, [partnerLocation, order, orderId, status]);
+
+
+    const renderStatusStep = (stepStatus: string, label: string, isCompleted: boolean, isActive: boolean) => (
+        <View style={styles.stepContainer}>
+            <View style={[styles.stepDot, isCompleted ? styles.stepDotCompleted : isActive ? styles.stepDotActive : styles.stepDotPending]}>
+                {isCompleted && (
+                    <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <SvgPolyline points="20 6 9 17 4 12" />
+                    </Svg>
+                )}
+            </View>
+            <View style={styles.stepContent}>
+                <MonoText weight={isActive || isCompleted ? 'bold' : 'regular'} color={isActive || isCompleted ? colors.black : colors.textLight}>
+                    {label}
+                </MonoText>
+                {isActive && <MonoText size="xs" color={colors.primary}>In Progress</MonoText>}
+            </View>
+        </View>
+    );
+
+    const getStatusStepState = (currentStatus: string, stepStatus: string) => {
+        // Order of statuses in progression
+        const statuses = ['confirmed', 'preparing', 'out_for_delivery', 'awaitconfirmation', 'delivered'];
+
+        // Normalize status for comparison
+        let normalizedStatus = currentStatus;
+        if (currentStatus === 'pending') normalizedStatus = 'confirmed';
+        if (currentStatus === 'accepted') normalizedStatus = 'preparing';
+        if (currentStatus === 'in-progress') normalizedStatus = 'out_for_delivery';
+
+        // Map display labels to internal status values
+        const mapStatus: Record<string, string> = {
+            'Confirmed': 'confirmed',
+            'Preparing': 'preparing',
+            'Out for Delivery': 'out_for_delivery',
+            'Awaiting Confirmation': 'awaitconfirmation',
+            'Delivered': 'delivered'
+        };
+
+        const currentIndex = statuses.indexOf(normalizedStatus);
+        const stepIndex = statuses.indexOf(mapStatus[stepStatus]);
+
+        return {
+            isCompleted: currentIndex > stepIndex,
+            isActive: currentIndex === stepIndex,
+        };
+    };
+
+    if (loading) {
+        return (
+            <SafeAreaView style={[styles.container, styles.center]}>
+                <ActivityIndicator size="large" color={colors.primary} />
+            </SafeAreaView>
+        );
+    }
+
+    return (
+        <View style={styles.container}>
+            {/* Header */}
+            <View style={styles.header}>
+                <TouchableOpacity onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })} style={styles.backBtn}>
+                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <Path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                        <SvgPolyline points="9 22 9 12 15 12 15 22" />
+                    </Svg>
+                </TouchableOpacity>
+                <View>
+                    <MonoText size="l" weight="bold">
+                        {isPastOrder ? 'Order Details' : 'Track Order'}
+                    </MonoText>
+                    <MonoText size="xs" color={colors.primary} weight="bold" style={{ textTransform: 'uppercase' }}>
+                        {status.replace('-', ' ')}
+                    </MonoText>
+                </View>
+                <View style={{ width: 40 }} />
+            </View>
+
+            {/* Map Area */}
+            <Animated.View style={[styles.mapContainer, { height: mapHeight }]}>
+                <MapView
+                    ref={mapRef}
+                    provider={PROVIDER_DEFAULT}
+                    style={{ width: '100%', height: MAP_HEIGHT_EXPANDED }}
+                    initialRegion={{
+                        latitude: 26.4499,
+                        longitude: 80.3319,
+                        latitudeDelta: 0.05,
+                        longitudeDelta: 0.05,
+                    }}
+                >
+                    {/* User Marker (Home) */}
+                    {(order?.shippingAddress?.latitude || order?.deliveryLocation?.latitude) && (
+                        <Marker coordinate={{
+                            latitude: order.shippingAddress?.latitude || order.deliveryLocation?.latitude,
+                            longitude: order.shippingAddress?.longitude || order.deliveryLocation?.longitude
+                        }} title="Delivery Location" description={order.deliveryLocation?.address}>
+                            <View style={styles.markerMyLoc}>
+                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <Path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                                </Svg>
+                            </View>
+                        </Marker>
+                    )}
+
+                    {/* Branch Marker (Store) */}
+                    {order?.pickupLocation?.latitude && (
+                        <Marker coordinate={{
+                            latitude: order.pickupLocation.latitude,
+                            longitude: order.pickupLocation.longitude
+                        }} title="Store Branch">
+                            <View style={styles.markerBranch}>
+                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <Path d="M3 21v-8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8" />
+                                    <Path d="M5 21v-8" />
+                                    <Path d="M19 21v-8" />
+                                    <Path d="M9 21v-8" />
+                                    <Path d="M15 21v-8" />
+                                    <Path d="M2 11h20M2 11l2-7h16l2 7" />
+                                </Svg>
+                            </View>
+                        </Marker>
+                    )}
+
+                    {/* Partner Marker (Bike) - Only if Active */}
+                    {isActiveOrder && partnerLocation && (
+                        <Marker
+                            ref={partnerMarkerRef}
+                            coordinate={partnerLocation}
+                            title="Delivery Partner"
+                        >
+                            <View style={styles.markerPartner}>
+                                <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2">
+                                    <Circle cx="12" cy="12" r="10" />
+                                    <Path d="M12 6v6l4 2" />
+                                </Svg>
+                            </View>
+                        </Marker>
+                    )}
+                </MapView>
+
+                {isActiveOrder && (
+                    <View style={styles.etaCard}>
+                        <MonoText size="xxl" weight="bold">
+                            {routeData?.duration || '--'}
+                        </MonoText>
+                        <MonoText size="xs" color={colors.textLight}>
+                            {routeData?.distance || 'Calculating...'}
+                        </MonoText>
+                    </View>
+                )}
+            </Animated.View>
+
+            {/* Bottom Sheet Content */}
+            <Animated.ScrollView
+                style={styles.bottomSheet}
+                contentContainerStyle={{ paddingBottom: 100, paddingTop: 20 }}
+                showsVerticalScrollIndicator={false}
+                bounces={true}
+                scrollEventThrottle={16}
+                onScroll={Animated.event(
+                    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                    { useNativeDriver: false }
+                )}
+            >
+                <View style={[styles.handle, { alignSelf: 'center' }]} />
+
+                {/* Status Summary for Past Orders */}
+                {isPastOrder && (
+                    <View style={styles.summaryCard}>
+                        <View style={styles.summaryItem}>
+                            <MonoText size="xl" weight="bold" color={colors.success}>
+                                {status === 'delivered' ? 'Delivered' : 'Cancelled'}
+                            </MonoText>
+                            <MonoText size="xs" color={colors.textLight}>
+                                {new Date(order.updatedAt).toLocaleString()}
+                            </MonoText>
+                        </View>
+                        {status === 'delivered' && (
+                            <View style={{ flexDirection: 'row', marginTop: 16, justifyContent: 'center' }}>
+                                <View style={{ alignItems: 'center' }}>
+                                    <MonoText weight="bold" size="l" color={colors.primary}>
+                                        {(() => {
+                                            const start = new Date(order.createdAt).getTime();
+                                            const end = new Date(order.updatedAt).getTime();
+                                            const diffMins = Math.floor((end - start) / 60000);
+                                            const hours = Math.floor(diffMins / 60);
+                                            const mins = diffMins % 60;
+                                            return hours > 0 ? `${hours}h ${mins}m` : `${mins} mins`;
+                                        })()}
+                                    </MonoText>
+                                    <MonoText size="xs" color={colors.textLight}>Total Time Taken</MonoText>
+                                </View>
+                            </View>
+                        )}
+                    </View>
+                )}
+
+                {/* Partner Info (Active Only) */}
+                {isActiveOrder && (
+                    order?.deliveryPartner ? (
+                        <View style={styles.partnerCard}>
+                            <View style={styles.partnerAvatar}>
+                                <MonoText size="xl">🛵</MonoText>
+                            </View>
+                            <View style={{ flex: 1, marginLeft: 12 }}>
+                                <MonoText weight="bold" size="m">{order.deliveryPartner.name || 'Delivery Partner'}</MonoText>
+                                <MonoText size="xs" color={colors.textLight}>Your delivery hero</MonoText>
+                            </View>
+                            <TouchableOpacity style={styles.callBtn} onPress={() => Linking.openURL(`tel:${order.deliveryPartner.phone}`)}>
+                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
+                                    <Path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                                </Svg>
+                            </TouchableOpacity>
+                        </View>
+                    ) : (
+                        <View style={[styles.partnerCard, { opacity: 0.7 }]}>
+                            <MonoText color={colors.textLight} style={{ fontStyle: 'italic' }}>Assigning delivery partner...</MonoText>
+                        </View>
+                    )
+                )}
+
+                {/* Timeline (Active Only) - Moved above details */}
+                {isActiveOrder && (
+                    <>
+                        <MonoText weight="bold" size="m" style={{ marginBottom: 16 }}>Order Status</MonoText>
+                        <View style={styles.timeline}>
+                            <View style={styles.timelineLine} />
+                            {['Confirmed', 'Preparing', 'Out for Delivery', 'Awaiting Confirmation', 'Delivered'].map((step) => {
+                                const { isCompleted, isActive } = getStatusStepState(status, step);
+                                return (
+                                    <View key={step}>
+                                        {renderStatusStep(step, step, isCompleted, isActive)}
+                                    </View>
+                                );
+                            })}
+                        </View>
+                        <View style={styles.divider} />
+                    </>
+                )}
+
+                {/* Delivery Address & Payment Status */}
+                <View style={styles.section}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <MonoText weight="bold" size="m">Order Details</MonoText>
+                        {order?.paymentStatus === 'verified' ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
+                                <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.success} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}>
+                                    <SvgPolyline points="20 6 9 17 4 12" />
+                                </Svg>
+                                <MonoText size="xs" color={colors.success} weight="bold">PAID</MonoText>
+                            </View>
+                        ) : order?.paymentDetails?.paymentMethod === 'cod' ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
+                                <MonoText size="xs" color="#D97706" weight="bold">PAY ON DELIVERY</MonoText>
+                            </View>
+                        ) : null}
+                    </View>
+
+                    <View style={styles.detailsCard}>
+                        {/* Branch Info */}
+                        {order?.branch?.name && (
+                            <View style={{ flexDirection: 'row', marginBottom: 16 }}>
+                                <View style={{ width: 32, alignItems: 'center', marginRight: 12 }}>
+                                    <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: 'rgba(0, 0, 0, 0.05)', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <Path d="M3 21v-8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8" />
+                                            <Path d="M5 21v-8" />
+                                            <Path d="M19 21v-8" />
+                                            <Path d="M2 11h20M2 11l2-7h16l2 7" />
+                                        </Svg>
+                                    </View>
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <MonoText weight="bold">Store Branch</MonoText>
+                                    <MonoText size="s" color={colors.textLight} style={{ marginTop: 2 }}>{order.branch.name}</MonoText>
+                                    {order.branch?.address && (
+                                        <MonoText size="xs" color={colors.textLight}>{order.branch.address}</MonoText>
+                                    )}
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Delivery Address */}
+                        <View style={{ flexDirection: 'row', marginBottom: 16 }}>
+                            <View style={{ width: 32, alignItems: 'center', marginRight: 12 }}>
+                                <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(239, 68, 68, 0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                        <Circle cx="12" cy="10" r="3" />
+                                    </Svg>
+                                </View>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <MonoText weight="bold">Delivery Address</MonoText>
+                                <MonoText size="s" color={colors.textLight} numberOfLines={3} style={{ marginTop: 2 }}>
+                                    {order?.deliveryLocation?.address || order?.shippingAddress?.address || 'Address not available'}
+                                </MonoText>
+                            </View>
+                        </View>
+
+                        <View style={styles.divider} />
+
+                        {/* Order Items - Detailed Breakdown */}
+                        {(() => {
+                            let totalSavings = 0;
+                            const itemsList = order?.items?.map((item: any, index: number) => {
+                                const product = item.id;
+                                const originalPrice = product?.price || 0;
+                                const discountPrice = product?.discountPrice;
+                                const finalPrice = discountPrice || originalPrice || 0;
+                                const quantity = item.count || 1;
+                                const itemTotal = finalPrice * quantity;
+
+                                if (discountPrice && discountPrice < originalPrice) {
+                                    totalSavings += (originalPrice - discountPrice) * quantity;
+                                }
+
+                                return (
+                                    <View key={index} style={styles.orderItemRow}>
+                                        <View style={{ flex: 1 }}>
+                                            <MonoText weight="bold" numberOfLines={1} size="s">{item.item || product?.name || 'Product'}</MonoText>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                {discountPrice && discountPrice < originalPrice && (
+                                                    <MonoText size="xs" color={colors.textLight} style={{ textDecorationLine: 'line-through', marginRight: 4 }}>
+                                                        ₹{originalPrice}
+                                                    </MonoText>
+                                                )}
+                                                <MonoText size="xs" color={colors.textLight}>
+                                                    ₹{finalPrice} × {quantity}
+                                                </MonoText>
+                                            </View>
+                                        </View>
+                                        <MonoText weight="bold">₹{itemTotal}</MonoText>
+                                    </View>
+                                );
+                            });
+
+                            return (
+                                <>
+                                    {itemsList}
+                                    <View style={styles.divider} />
+                                    {totalSavings > 0 && (
+                                        <View style={[styles.billRow, { marginBottom: 4 }]}>
+                                            <MonoText size="s" color={colors.success}>Total Savings</MonoText>
+                                            <MonoText size="s" color={colors.success}>-₹{totalSavings}</MonoText>
+                                        </View>
+                                    )}
+                                </>
+                            );
+                        })()}
+
+                        {/* Summary */}
+                        <View style={styles.billRow}>
+                            <MonoText size="s" color={colors.textLight}>Subtotal</MonoText>
+                            <MonoText size="s">₹{(order?.totalPrice || 0) - (order?.deliveryFee || 0)}</MonoText>
+                        </View>
+                        <View style={[styles.billRow, { marginTop: 4 }]}>
+                            <MonoText size="s" color={colors.textLight}>Delivery Fee</MonoText>
+                            <MonoText size="s">{order?.deliveryFee === 0 ? 'FREE' : `₹${order?.deliveryFee}`}</MonoText>
+                        </View>
+                        <View style={[styles.billRow, { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border }]}>
+                            <MonoText weight="bold">Grand Total</MonoText>
+                            <MonoText weight="bold" size="l" color={colors.primary}>₹{order?.totalPrice}</MonoText>
+                        </View>
+                        <View style={[styles.billRow, { marginTop: 12 }]}>
+                            <MonoText size="xs" color={colors.textLight}>Order ID</MonoText>
+                            <MonoText size="xs" weight="bold" color={colors.primary}>#{order?.orderId || order?._id?.slice(-6).toUpperCase()}</MonoText>
+                        </View>
+                    </View>
+
+                    {/* Download Invoice Button */}
+                    {isPastOrder && (
+                        <TouchableOpacity
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backgroundColor: colors.black,
+                                paddingVertical: 14,
+                                borderRadius: 12,
+                                marginTop: 16
+                            }}
+                            onPress={async () => {
+                                try {
+                                    const invoiceData = invoiceService.createInvoiceFromOrder(order);
+                                    await invoiceService.generateAndShareInvoice(invoiceData);
+                                } catch (err) {
+                                    logger.error('Invoice error:', err);
+                                }
+                            }}
+                        >
+                            <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 8 }}>
+                                <Path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <SvgPolyline points="14 2 14 8 20 8" />
+                                <Path d="M12 18v-6" />
+                                <Path d="M9 15l3 3 3-3" />
+                            </Svg>
+                            <MonoText color={colors.white} weight="bold">Download Invoice</MonoText>
+                        </TouchableOpacity>
+                    )}
+                </View>
+
+
+                {/* Order Received Button - Show when awaiting customer confirmation */}
+                {(status === 'out_for_delivery' || status === 'awaitconfirmation' || status === 'in-progress') && (
+                    <View style={{ paddingHorizontal: 20, paddingBottom: 20 }}>
+                        {status === 'awaitconfirmation' && (
+                            <View style={styles.awaitingBanner}>
+                                <MonoText size="s" color={colors.white} weight="bold" style={{ textAlign: 'center' }}>
+                                    📦 Your delivery partner has arrived! Please confirm receipt.
+                                </MonoText>
+                            </View>
+                        )}
+                        <TouchableOpacity
+                            style={[
+                                styles.confirmBtn,
+                                status === 'awaitconfirmation' && { backgroundColor: colors.success }
+                            ]}
+                            onPress={() => {
+                                Alert.alert(
+                                    "Confirm Delivery",
+                                    "Have you received your order?",
+                                    [
+                                        { text: "No", style: "cancel" },
+                                        {
+                                            text: "Yes, Received",
+                                            onPress: async () => {
+                                                try {
+                                                    setLoading(true);
+                                                    await orderService.confirmDelivery(orderId);
+                                                    setStatus('delivered');
+                                                    // Refresh order details to show summary
+                                                    const res = await api.get(`/orders/${orderId}`);
+                                                    setOrder(res.data.order);
+                                                } catch (err) {
+                                                    Alert.alert("Error", "Failed to update status");
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }
+                                        }
+                                    ]
+                                );
+                            }}
+                        >
+                            <MonoText color={colors.white} weight="bold" size="m">
+                                {status === 'awaitconfirmation' ? '✓ Confirm Order Received' : 'Order Received'}
+                            </MonoText>
+                        </TouchableOpacity>
+                    </View>
+                )}
+            </Animated.ScrollView>
+        </View>
+    );
+};
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: colors.background,
+    },
+    center: {
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    header: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 100,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: spacing.l,
+        paddingTop: Platform.OS === 'android' ? 40 : 60,
+        paddingBottom: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.05)',
+    },
+    backBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'white',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    mapContainer: {
+        width: '100%',
+        overflow: 'hidden',
+    },
+    markerMyLoc: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 3,
+        borderColor: colors.white,
+        shadowColor: 'black',
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+    },
+    markerBranch: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        backgroundColor: colors.black,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 3,
+        borderColor: colors.white,
+    },
+    markerPartner: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#FDE047',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 3,
+        borderColor: colors.white,
+        shadowColor: 'black',
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+    },
+    etaCard: {
+        position: 'absolute',
+        top: Platform.OS === 'android' ? 100 : 120,
+        right: 20,
+        backgroundColor: 'white',
+        padding: 12,
+        borderRadius: 12,
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
+        alignItems: 'center',
+    },
+    bottomSheet: {
+        flex: 1,
+        backgroundColor: 'white',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        paddingHorizontal: spacing.l,
+        marginTop: -20, // Overlap map slightly
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+        elevation: 10,
+    },
+    handle: {
+        width: 40,
+        height: 4,
+        backgroundColor: '#E5E7EB',
+        borderRadius: 2,
+        marginBottom: 20,
+    },
+    partnerCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F8FAFC',
+        padding: 12,
+        borderRadius: 16,
+        marginBottom: 20,
+    },
+    partnerAvatar: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#E0F2FE',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    callBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'white',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    divider: {
+        height: 1,
+        backgroundColor: '#F1F5F9',
+        marginBottom: 20,
+    },
+    timeline: {
+        marginLeft: 10,
+    },
+    timelineLine: {
+        position: 'absolute',
+        left: 9,
+        top: 0,
+        bottom: 20,
+        width: 2,
+        backgroundColor: '#E2E8F0',
+    },
+    stepContainer: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        marginBottom: 24,
+    },
+    stepDot: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: 'white',
+        borderWidth: 2,
+        borderColor: '#E2E8F0',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1,
+    },
+    stepDotActive: {
+        borderColor: colors.primary,
+        backgroundColor: 'white',
+    },
+    stepDotCompleted: {
+        backgroundColor: colors.primary,
+        borderColor: colors.primary,
+    },
+    stepDotPending: {
+        borderColor: '#E2E8F0',
+    },
+    stepContent: {
+        marginLeft: 16,
+        flex: 1,
+    },
+    section: {
+        marginBottom: 20,
+    },
+    detailsCard: {
+        backgroundColor: '#F8FAFC',
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#F1F5F9',
+    },
+    orderItemRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 12,
+    },
+    billRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    summaryCard: {
+        alignItems: 'center',
+        padding: 24,
+        backgroundColor: '#F0FDF4',
+        borderRadius: 16,
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: '#DCFCE7',
+    },
+    summaryItem: {
+        alignItems: 'center',
+    },
+    confirmBtn: {
+        backgroundColor: colors.primary,
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        shadowColor: colors.primary,
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    awaitingBanner: {
+        backgroundColor: colors.success,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 12,
+        marginBottom: 12,
+    },
+});

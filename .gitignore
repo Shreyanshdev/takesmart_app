@@ -73,3 +73,62 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Environment files - IMPORTANT: Never commit secrets!
+.env
+.env.local
+.env.development
+.env.production
+.env*.local
+
+# Release builds / APKs
+*.apk
+*.aab
+*.ipa
+android/app/build/
+android/build/
+android/.gradle/
+ios/build/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Cache
+.cache/
+.eslintcache
+.babel-cache/
+metro-cache/
+
+# Misc
+*.swp
+*.swo
+*~
+.tmp/
+tmp/
+
+# Google Services (if contains API keys)
+# google-services.json
+# GoogleService-Info.plist
+
+# Keystore files (keep secure, don't commit)
+*.keystore
+*.jks
+!debug.keystore
+
+# Sentry
+.sentryclirc
