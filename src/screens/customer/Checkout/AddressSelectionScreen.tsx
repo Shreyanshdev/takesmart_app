@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, Alert, FlatList } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView, Alert, FlatList, ActivityIndicator, Animated } from 'react-native';
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';
 import { MonoText } from '../../../components/shared/MonoText';
@@ -50,6 +50,19 @@ export const AddressSelectionScreen = () => {
     const [addresses, setAddresses] = useState<Address[]>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const fadeAnim = React.useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        if (loading) {
+            Animated.timing(fadeAnim, {
+                toValue: 1,
+                duration: 600,
+                useNativeDriver: true,
+            }).start();
+        } else {
+            fadeAnim.setValue(0);
+        }
+    }, [loading]);
 
     const fetchAddresses = async () => {
         setLoading(true);
@@ -145,7 +158,19 @@ export const AddressSelectionScreen = () => {
             </View>
 
             {loading ? (
-                <MonoText style={{ textAlign: 'center', marginTop: 20 }}>Loading addresses...</MonoText>
+                <View style={styles.loaderContainer}>
+                    <Animated.View style={[styles.loaderContent, { opacity: fadeAnim }]}>
+                        <View style={styles.loaderIconWrapper}>
+                            <Svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                <Circle cx="12" cy="10" r="3" />
+                            </Svg>
+                        </View>
+                        <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 16 }} />
+                        <MonoText size="m" weight="bold" style={styles.loaderText}>Searching for Locations</MonoText>
+                        <MonoText size="xs" color={colors.textLight} style={styles.loaderSubText}>Bringing fresh dairy to your doorstep...</MonoText>
+                    </Animated.View>
+                </View>
             ) : (
                 <View style={{ flex: 1, padding: spacing.l }}>
                     <FlatList
@@ -343,6 +368,32 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         padding: spacing.xl,
+    },
+    loaderContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: colors.background,
+    },
+    loaderContent: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    loaderIconWrapper: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: `${colors.primary}15`,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    loaderText: {
+        marginTop: 12,
+        color: colors.text,
+    },
+    loaderSubText: {
+        marginTop: 4,
+        textAlign: 'center',
     }
 });
 

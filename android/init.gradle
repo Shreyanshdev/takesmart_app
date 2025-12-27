@@ -1,0 +1,23 @@
+// Fix for deprecated jcenter() method in Gradle 9+
+// This script adds a jcenter() method that aliases to mavenCentral()
+
+allprojects {
+    buildscript {
+        repositories {
+            // Define jcenter as alias to mavenCentral
+            ext.jcenter = { 
+                mavenCentral() 
+            }
+        }
+    }
+}
+
+settingsEvaluated { settings ->
+    settings.pluginManagement {
+        repositories {
+            gradlePluginPortal()
+            google()
+            mavenCentral()
+        }
+    }
+}

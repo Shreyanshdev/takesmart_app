@@ -12,12 +12,14 @@ interface PasswordBottomSheetProps {
     visible: boolean;
     onClose: () => void;
     onLogin: (password: string) => void;
+    loading?: boolean;
 }
 
 export const PasswordBottomSheet: React.FC<PasswordBottomSheetProps> = ({
     visible,
     onClose,
     onLogin,
+    loading = false,
 }) => {
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -63,7 +65,8 @@ export const PasswordBottomSheet: React.FC<PasswordBottomSheetProps> = ({
                 <PillButton
                     title="LOGIN"
                     onPress={() => onLogin(password)}
-                    disabled={!password}
+                    disabled={!password || loading}
+                    loading={loading}
                     style={styles.button}
                 />
             </View>

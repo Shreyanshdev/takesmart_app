@@ -19,3 +19,19 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+// Fix for libraries using deprecated jcenter() in Gradle 9+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+    
+    // Override jcenter references in subprojects
+    configurations.all {
+        resolutionStrategy {
+            force 'com.facebook.react:react-android:0.81.4'
+        }
+    }
+}

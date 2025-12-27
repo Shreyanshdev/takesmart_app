@@ -5,6 +5,7 @@ import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import { MonoText } from '../components/shared/MonoText';
+import { usePartnerStore } from '../store/partnerStore';
 
 import { PartnerHomeScreen } from '../screens/partner/PartnerHomeScreen';
 import { ActiveOrdersScreen } from '../screens/partner/ActiveOrdersScreen';
@@ -58,6 +59,9 @@ const TabIcon: React.FC<TabIconProps> = ({ focused, color, iconType }) => {
 };
 
 export const PartnerTabNavigator = () => {
+    // Get available orders count for badge
+    const availableOrdersCount = usePartnerStore(state => state.availableOrders.length);
+
     return (
         <Tab.Navigator
             screenOptions={{
@@ -77,6 +81,9 @@ export const PartnerTabNavigator = () => {
                     tabBarIcon: ({ focused, color }) => (
                         <TabIcon focused={focused} color={color} iconType="home" />
                     ),
+                    // Show badge with available orders count
+                    tabBarBadge: availableOrdersCount > 0 ? availableOrdersCount : undefined,
+                    tabBarBadgeStyle: styles.badge,
                 }}
             />
             <Tab.Screen
@@ -139,4 +146,12 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         marginTop: 2,
     },
+    badge: {
+        backgroundColor: colors.primary,
+        fontSize: 10,
+        fontWeight: '700',
+        minWidth: 18,
+        height: 18,
+    },
 });
+

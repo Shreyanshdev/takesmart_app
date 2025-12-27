@@ -33,6 +33,7 @@ export const OrderTrackingScreen = () => {
     const [order, setOrder] = useState<any>(null);
     const [partnerLocation, setPartnerLocation] = useState<{ latitude: number, longitude: number } | null>(null);
     const [routeData, setRouteData] = useState<{ distance: string; duration: string } | null>(null);
+    const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
     const [status, setStatus] = useState<string>('confirmed'); // pending, confirmed, preparing, out_for_delivery, delivered, cancelled
 
     const mapRef = useRef<MapView>(null);
@@ -142,10 +143,11 @@ export const OrderTrackingScreen = () => {
         };
     }, [orderId, isPastOrder]);
 
-    // Fit Map Markers
+    // Fit Map to show all markers and route
     useEffect(() => {
         if (order && mapRef.current) {
-            const markers = [];
+            const markers: { latitude: number; longitude: number }[] = [];
+            const hasPartner = !!order.deliveryPartner;
 
             // User Location (Prioritize deliveryLocation from new API structure)
             const userLoc = order.deliveryLocation || order.shippingAddress;
@@ -156,12 +158,12 @@ export const OrderTrackingScreen = () => {
                 });
             }
 
-            // Partner Location (if active)
-            if (partnerLocation) {
+            // Partner Location - ONLY include if partner is assigned and has location
+            if (hasPartner && partnerLocation) {
                 markers.push(partnerLocation);
             }
 
-            // Branch Location
+            // Branch Location - always show when no partner, or when partner not picked up yet
             if (order.pickupLocation?.latitude) {
                 markers.push({
                     latitude: order.pickupLocation.latitude,
@@ -169,48 +171,109 @@ export const OrderTrackingScreen = () => {
                 });
             }
 
+            // Include route start/end for better fit (use first and last route points)
+            if (routeCoordinates.length > 0) {
+                markers.push(routeCoordinates[0]);
+                markers.push(routeCoordinates[routeCoordinates.length - 1]);
+            }
+
+            console.log('>>> Fitting map <<<', {
+                hasPartner,
+                markersCount: markers.length,
+                routeCoordsCount: routeCoordinates.length
+            });
+
             if (markers.length > 0) {
                 mapRef.current.fitToCoordinates(markers, {
-                    edgePadding: { top: 100, right: 50, bottom: 50, left: 50 },
+                    edgePadding: { top: 100, right: 50, bottom: 100, left: 50 },
                     animated: true,
                 });
             }
         }
-    }, [partnerLocation, order]);
+    }, [partnerLocation, order, routeCoordinates]);
 
-    // Fetch route data for ETA
+    // Helper function to decode Google polyline
+    const decodePolyline = (encoded: string): { latitude: number; longitude: number }[] => {
+        const points: { latitude: number; longitude: number }[] = [];
+        let index = 0;
+        let lat = 0;
+        let lng = 0;
+
+        while (index < encoded.length) {
+            let shift = 0;
+            let result = 0;
+            let byte;
+
+            do {
+                byte = encoded.charCodeAt(index++) - 63;
+                result |= (byte & 0x1f) << shift;
+                shift += 5;
+            } while (byte >= 0x20);
+
+            const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+            lat += dlat;
+
+            shift = 0;
+            result = 0;
+
+            do {
+                byte = encoded.charCodeAt(index++) - 63;
+                result |= (byte & 0x1f) << shift;
+                shift += 5;
+            } while (byte >= 0x20);
+
+            const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+            lng += dlng;
+
+            points.push({
+                latitude: lat / 1e5,
+                longitude: lng / 1e5,
+            });
+        }
+
+        return points;
+    };
+
+    // Fetch route data - works in all order states
     useEffect(() => {
         const fetchRouteData = async () => {
-            if (!order) return;
+            if (!order) {
+                return;
+            }
 
             const customerLocation = order.deliveryLocation || order.shippingAddress;
             if (!customerLocation?.latitude) return;
 
-            // Determine Origin based on status
-            // Logic: 
-            // - If 'out_for_delivery', use Partner Live Location (if available)
-            // - Else (confirmed, preparing, etc.), use Branch Location
+            // Determine Origin based on order state:
+            // 1. If order is picked up (in-progress/out_for_delivery) AND partner location available → use partner location
+            // 2. Otherwise → use branch location (even before partner is assigned)
             let originLocation = null;
             let originAddress = '';
+            let routeType = 'branch-to-customer';
 
-            const isOutForDelivery = status === 'out_for_delivery' || status === 'reaching' || status === 'awaiting_confirmation';
+            const isPickedUp = ['out_for_delivery', 'in-progress', 'reaching', 'awaitconfirmation'].includes(status);
 
-            if (isOutForDelivery && partnerLocation) {
+            if (isPickedUp && partnerLocation) {
+                // Order is picked up, track from partner → customer
                 originLocation = partnerLocation;
                 originAddress = 'Partner Location';
+                routeType = 'partner-to-customer';
             } else if (order.pickupLocation && order.pickupLocation.latitude) {
+                // Order not picked up yet, show route from branch → customer
                 originLocation = {
                     latitude: order.pickupLocation.latitude,
                     longitude: order.pickupLocation.longitude
                 };
                 originAddress = order.pickupLocation.address || 'Branch Location';
+                routeType = 'branch-to-customer';
             }
 
-            // If no origin available (e.g. no branch loc and no partner loc), skip
+            // If no origin available, skip
             if (!originLocation) return;
 
             try {
                 // Use customer-accessible endpoint
+                console.log('>>> Fetching route directions <<<', { originLocation, routeType });
                 const response = await api.post(`/orders/${orderId}/directions/customer`, {
                     origin: {
                         latitude: originLocation.latitude,
@@ -222,21 +285,43 @@ export const OrderTrackingScreen = () => {
                         longitude: customerLocation.longitude,
                         address: customerLocation.address || 'Customer Location'
                     },
-                    routeType: isOutForDelivery ? 'partner-to-customer' : 'branch-to-customer',
+                    routeType: routeType,
                     updateOrder: false
                 });
 
+                console.log('>>> Route API Response <<<', JSON.stringify(response.data, null, 2));
+
                 if (response.data?.routeData) {
-                    const { distance, duration } = response.data.routeData;
+                    const { distance, duration, polyline, coordinates } = response.data.routeData;
+                    console.log('>>> Route Data <<<', { distance, duration, hasPolyline: !!polyline, hasCoordinates: !!coordinates, coordsLength: coordinates?.length });
+
                     setRouteData({
                         distance: distance?.text || '--',
                         duration: duration?.text || '--'
                     });
+
+                    // Try to use coordinates directly if available, otherwise decode polyline
+                    if (coordinates && coordinates.length > 0) {
+                        console.log('>>> Using direct coordinates <<<', coordinates.length);
+                        setRouteCoordinates(coordinates);
+                    } else if (polyline) {
+                        console.log('>>> Decoding polyline <<<', polyline.substring(0, 50) + '...');
+                        const decoded = decodePolyline(polyline);
+                        console.log('>>> Decoded coords <<<', decoded.length);
+                        setRouteCoordinates(decoded);
+                    } else {
+                        console.log('>>> No polyline or coordinates in response <<<');
+                        // Create straight line as fallback
+                        setRouteCoordinates([
+                            { latitude: originLocation.latitude, longitude: originLocation.longitude },
+                            { latitude: customerLocation.latitude, longitude: customerLocation.longitude }
+                        ]);
+                    }
                 }
             } catch (error) {
                 logger.error('Failed to fetch route data:', error);
 
-                // Fallback Distance Calc
+                // Fallback Distance Calc - SAME formula as checkout screen
                 const originLat = originLocation.latitude;
                 const originLng = originLocation.longitude;
                 const customerLat = customerLocation.latitude;
@@ -246,12 +331,22 @@ export const OrderTrackingScreen = () => {
                     Math.pow((originLat - customerLat) * 111, 2) +
                     Math.pow((originLng - customerLng) * 111 * Math.cos(originLat * Math.PI / 180), 2)
                 );
-                const etaMins = Math.round(distKm * 3); // Assume ~20 km/h average speed in city
+
+                // SAME ETA formula as checkout: Math.ceil(distKm * 5 + 15)
+                const etaMins = Math.ceil(distKm * 5 + 15);
+
+                console.log('>>> Using fallback ETA calculation <<<', { distKm: distKm.toFixed(1), etaMins });
 
                 setRouteData({
                     distance: `${distKm.toFixed(1)} km`,
                     duration: `${etaMins} mins`
                 });
+
+                // Create simple straight line route as fallback
+                setRouteCoordinates([
+                    { latitude: originLat, longitude: originLng },
+                    { latitude: customerLat, longitude: customerLng }
+                ]);
             }
         };
 
@@ -395,16 +490,75 @@ export const OrderTrackingScreen = () => {
                             </View>
                         </Marker>
                     )}
+
+                    {/* Route Polyline - Show for all active orders with route */}
+                    {isActiveOrder && routeCoordinates.length > 0 && (
+                        <MapPolyline
+                            coordinates={routeCoordinates}
+                            strokeWidth={4}
+                            strokeColor={colors.primary}
+                            lineDashPattern={[0]}
+                        />
+                    )}
                 </MapView>
 
-                {isActiveOrder && (
+                {/* ETA/Status Card - Always show for active orders */}
+                {isActiveOrder && routeData && (
                     <View style={styles.etaCard}>
-                        <MonoText size="xxl" weight="bold">
-                            {routeData?.duration || '--'}
-                        </MonoText>
-                        <MonoText size="xs" color={colors.textLight}>
-                            {routeData?.distance || 'Calculating...'}
-                        </MonoText>
+                        {(() => {
+                            const isPickedUp = ['out_for_delivery', 'in-progress', 'reaching', 'awaitconfirmation'].includes(status);
+                            const hasPartner = !!order?.deliveryPartner;
+                            const branchName = order?.pickupLocation?.address || order?.branch?.name || 'Branch';
+
+                            if (isPickedUp && hasPartner) {
+                                // Partner picked up and on the way
+                                return (
+                                    <>
+                                        <MonoText size="xxl" weight="bold" color={colors.primary}>
+                                            {routeData.duration}
+                                        </MonoText>
+                                        <MonoText size="xs" color={colors.textLight}>
+                                            {routeData.distance} away
+                                        </MonoText>
+                                        <MonoText size="xs" color={colors.success} style={{ marginTop: 4 }}>
+                                            On the way to you!
+                                        </MonoText>
+                                    </>
+                                );
+                            } else if (hasPartner) {
+                                // Partner assigned but not picked up yet
+                                return (
+                                    <>
+                                        <MonoText size="xs" color={colors.success} weight="bold" style={{ marginBottom: 4 }}>
+                                            ✓ Partner Assigned
+                                        </MonoText>
+                                        <MonoText size="l" weight="bold" color={colors.accent}>
+                                            ~{routeData.duration}
+                                        </MonoText>
+                                        <MonoText size="xs" color={colors.textLight} style={{ textAlign: 'center', marginTop: 6 }}>
+                                            Your order is being picked up from the store and will be delivered to you soon.
+                                        </MonoText>
+                                    </>
+                                );
+                            } else {
+                                // No partner assigned yet - show please wait message
+                                return (
+                                    <>
+                                        <MonoText size="xs" color={colors.accent} weight="bold" style={{ marginBottom: 6 }}>
+                                            ⏳ Please Wait
+                                        </MonoText>
+                                        <MonoText size="xs" color={colors.textLight} style={{ textAlign: 'center', marginTop: 4, paddingHorizontal: 8 }}>
+                                            We're assigning a delivery partner. Once picked up, your order will reach you in approx {routeData.duration}.
+                                        </MonoText>
+                                        <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, marginTop: 10 }}>
+                                            <MonoText size="xs" color="#854D0E" weight="bold">
+                                                Looking for partner...
+                                            </MonoText>
+                                        </View>
+                                    </>
+                                );
+                            }
+                        })()}
                     </View>
                 )}
             </Animated.View>
@@ -792,15 +946,17 @@ const styles = StyleSheet.create({
     },
     etaCard: {
         position: 'absolute',
-        top: Platform.OS === 'android' ? 100 : 120,
-        right: 20,
+        top: Platform.OS === 'android' ? 110 : 130,
+        right: 16,
+        left: 16,
         backgroundColor: 'white',
-        padding: 12,
-        borderRadius: 12,
+        padding: 16,
+        borderRadius: 16,
         shadowColor: '#000',
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4,
+        shadowOpacity: 0.15,
+        shadowOffset: { width: 0, height: 4 },
+        shadowRadius: 12,
+        elevation: 6,
         alignItems: 'center',
     },
     bottomSheet: {

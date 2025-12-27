@@ -90,6 +90,7 @@ export const PartnerLoginScreen = () => {
                 visible={passwordVisible}
                 onClose={() => setPasswordVisible(false)}
                 onLogin={handleLogin}
+                loading={loading}
             />
         </SafeAreaView>
     );

@@ -56,7 +56,7 @@ export const AddAddressScreen = () => {
     } : { latitude: INITIAL_REGION.latitude, longitude: INITIAL_REGION.longitude });
     const [isFetchingLocation, setIsFetchingLocation] = useState(false);
     const [isFetchingAddress, setIsFetchingAddress] = useState(false);
-    const [locationConfirmed, setLocationConfirmed] = useState(isEditMode); // Edit mode starts confirmed
+    const [locationConfirmed, setLocationConfirmed] = useState(true); // Auto-confirmed since address updates on map move
 
     // Form State
     const [addressLine1, setAddressLine1] = useState(editAddress?.addressLine1 || '');
@@ -144,6 +144,8 @@ export const AddAddressScreen = () => {
         setMarkerCoord({ latitude: r.latitude, longitude: r.longitude });
         // Auto-fetch address when map stops moving
         fetchAddressFromCoords(r.latitude, r.longitude);
+        // Auto-confirm location since user has interacted with map
+        setLocationConfirmed(true);
     };
 
     // Fetch address on initial load for new addresses
@@ -369,25 +371,7 @@ export const AddAddressScreen = () => {
                     )}
                 </TouchableOpacity>
 
-                {/* Confirm Location Button */}
-                <TouchableOpacity
-                    style={styles.confirmLocBtn}
-                    onPress={handleConfirmLocation}
-                    disabled={isFetchingAddress}
-                >
-                    {isFetchingAddress ? (
-                        <ActivityIndicator size="small" color={colors.white} />
-                    ) : (
-                        <>
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <Polyline points="20 6 9 17 4 12" />
-                            </Svg>
-                            <MonoText size="s" weight="bold" color={colors.white} style={{ marginLeft: 8 }}>
-                                Confirm This Location
-                            </MonoText>
-                        </>
-                    )}
-                </TouchableOpacity>
+
             </Animated.View>
 
             {/* Form Section with KeyboardAvoidingView */}
@@ -410,19 +394,7 @@ export const AddAddressScreen = () => {
                 >
                     {/* Handle Bar */}
                     <View style={styles.handle} />
-                    {/* Notice Banner - Show when location not confirmed */}
-                    {!locationConfirmed && (
-                        <View style={styles.noticeBanner}>
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.warning} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <Circle cx="12" cy="12" r="10" />
-                                <Line x1="12" y1="8" x2="12" y2="12" />
-                                <Line x1="12" y1="16" x2="12.01" y2="16" />
-                            </Svg>
-                            <MonoText size="xs" color={colors.warning} style={{ marginLeft: 8, flex: 1 }}>
-                                Please select your location on the map and tap "Confirm This Location" before filling the details.
-                            </MonoText>
-                        </View>
-                    )}
+
 
                     <MonoText size="l" weight="bold" style={styles.formTitle}>
                         {isEditMode ? 'Edit Address' : 'Add Address Details'}

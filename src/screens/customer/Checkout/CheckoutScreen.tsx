@@ -509,7 +509,24 @@ export const CheckoutScreen = () => {
     if (loading) {
         return (
             <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-                <MonoText>Loading checkout details...</MonoText>
+                <View style={{ alignItems: 'center' }}>
+                    <View style={{
+                        width: 80,
+                        height: 80,
+                        borderRadius: 40,
+                        backgroundColor: `${colors.primary}15`,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                    }}>
+                        <Svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
+                            <Path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+                            <Circle cx="12" cy="9" r="3" />
+                        </Svg>
+                    </View>
+                    <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />
+                    <MonoText size="m" weight="bold" style={{ marginTop: 16 }}>Preparing Checkout</MonoText>
+                    <MonoText size="s" color={colors.textLight} style={{ marginTop: 4 }}>Getting everything ready for you...</MonoText>
+                </View>
             </SafeAreaView>
         );
     }
