@@ -1,22 +1,20 @@
 import { create } from 'zustand';
 import { Product, Category, productService } from '../services/customer/product.service';
 import { UserProfile, userService } from '../services/customer/user.service';
-import { subscriptionService, Branch, Subscription } from '../services/customer/subscription.service';
+import { orderService } from '../services/customer/order.service';
+import { getCurrentBranchId } from './branch.store';
 import { logger } from '../utils/logger';
 
-interface HomeState {
+export interface HomeState {
     isLocationHeaderVisible: boolean;
     isTabBarVisible: boolean;
     scrollY: number;
 
     // Data State
     categories: Category[];
-    featuredProducts: Product[];
-    subscriptionProducts: Product[];
     normalProducts: Product[];
     userProfile: UserProfile | null;
-    currentSubscription: Subscription | null;
-    nearestBranch: Branch | null;
+    awaitingConfirmationCount: number;
 
     isLoading: boolean;
     error: string | null;
@@ -35,12 +33,9 @@ export const useHomeStore = create<HomeState>((set, get) => ({
     scrollY: 0,
 
     categories: [],
-    featuredProducts: [],
-    subscriptionProducts: [],
     normalProducts: [],
     userProfile: null,
-    currentSubscription: null,
-    nearestBranch: null,
+    awaitingConfirmationCount: 0,
 
     isLoading: false,
     error: null,
@@ -50,33 +45,26 @@ export const useHomeStore = create<HomeState>((set, get) => ({
     setScrollY: (y) => set({ scrollY: y }),
 
     fetchHomeData: async () => {
-        // Optimistic UI: Don't set isLoading if we already have data (stale-while-revalidate)
-        // Only set loading if it's the very first load or empty state
         const hasData = get().categories.length > 0;
         if (!hasData) {
             set({ isLoading: true, error: null });
         } else {
-            set({ error: null }); // Clear error on retry
+            set({ error: null });
         }
 
         try {
-            // Initiate all requests in parallel
-            // We don't await profile before starting others.
-            // subscriptionService.getMySubscription() handles its own auth check internally via api interceptors
+            // Get current branch for location-based pricing
+            const branchId = getCurrentBranchId();
 
             const results = await Promise.allSettled([
                 productService.getCategories(),
-                productService.getFeaturedProducts(),
-                productService.getSubscriptionProducts(),
-                productService.getAllProducts(),
+                productService.getAllProducts(branchId), // Pass branchId for inventory pricing
                 userService.getProfile(),
-                subscriptionService.getMySubscription()
+                orderService.getOrders()
             ]);
 
-            // Helper to get value or default, with type safety check for arrays
             const getValue = (result: PromiseSettledResult<any>, defaultVal: any) => {
                 if (result.status === 'fulfilled' && result.value !== undefined && result.value !== null) {
-                    // Safety: If we expect an array (defaultVal is array), ensure value is array
                     if (Array.isArray(defaultVal) && !Array.isArray(result.value)) {
                         return defaultVal;
                     }
@@ -86,32 +74,20 @@ export const useHomeStore = create<HomeState>((set, get) => ({
             };
 
             const categories = getValue(results[0], []);
-            const featured = getValue(results[1], []);
-            const subs = getValue(results[2], []);
-            const normal = getValue(results[3], []);
-            const profile = getValue(results[4], null);
-            const userSubscription = getValue(results[5], null);
+            const normal = getValue(results[1], []);
+            const profile = getValue(results[2], null);
+            const ordersData = getValue(results[3], null);
 
-            // Fetch Nearest Branch - Dependent on location if available
-            // This is the only sequential part, but it's minor.
-            // We can even optimistically try to fetch it if we have a cached location in store
-            let currentBranch = null;
-            if (profile?.activeAddress?.coordinates) {
-                const { lat, lng } = profile.activeAddress.coordinates;
-                try {
-                    const branchData = await subscriptionService.getNearestBranch(lat, lng);
-                    currentBranch = branchData.branch;
-                } catch (e) { /* ignore branch error */ }
+            let awaitingConfirmationCount = 0;
+            if (ordersData && ordersData.orders) {
+                awaitingConfirmationCount = ordersData.orders.filter((o: any) => o.status === 'awaitconfirmation').length;
             }
 
             set({
                 categories,
-                featuredProducts: featured,
-                subscriptionProducts: subs,
                 normalProducts: normal,
                 userProfile: profile,
-                currentSubscription: userSubscription,
-                nearestBranch: currentBranch,
+                awaitingConfirmationCount,
                 isLoading: false,
                 error: null
             });
@@ -119,7 +95,6 @@ export const useHomeStore = create<HomeState>((set, get) => ({
             logger.error('Failed to fetch home data', error);
             set({
                 isLoading: false,
-                // Only show error if we have NO data to show, otherwise silent fail (toast in future)
                 error: !hasData ? (error.message || 'Failed to refresh data.') : null
             });
         }

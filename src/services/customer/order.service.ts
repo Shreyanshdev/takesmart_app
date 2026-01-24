@@ -8,48 +8,22 @@ export interface OrderItem {
 
 export interface CreateOrderPayload {
     userId: string;
-    branch: string;
+    branchId: string;
     items: {
-        id: string;
-        item: string;
-        count: number;
+        inventoryId: string;
+        quantity: number;
     }[];
     addressId: string;
     totalPrice: number;
     deliveryFee: number;
+    sgst?: number;
+    cgst?: number;
+    couponCode?: string | null;
+    couponDiscount?: number;
     paymentMethod?: 'cod' | 'online';
 }
 
-export interface CreateSubscriptionPayload {
-    product: string;
-    quantity: number;
-    shippingAddress: string;
-    frequency: 'daily' | 'alternate' | 'weekly' | 'monthly';
-    startDate: string; // ISO Date string
-    slot: 'morning' | 'evening';
-    paymentMethod: 'cod' | 'online';
-}
 
-export interface EnhancedSubscriptionProduct {
-    productId: string;
-    selectedQuantity: string;
-    animalType: string;
-    deliveryFrequency: string;
-    count: number;
-    unitPrice: number;
-    monthlyPrice: number;
-}
-
-export interface CreateEnhancedSubscriptionPayload {
-    customerId: string;
-    products: EnhancedSubscriptionProduct[];
-    slot: string;
-    startDate: string;
-    endDate: string;
-    addressId: string;
-    branchId: string;
-    branchName?: string;
-}
 
 export interface CreatePaymentOrderPayload {
     amount: number;
@@ -64,37 +38,26 @@ export interface VerifyPaymentPayload {
     payment_id: string;
     signature: string;
     appOrderId?: string;
-    subscriptionId?: string;
     amount?: number;
 }
 
 export const orderService = {
     // Create a normal one-time order
     createOrder: async (payload: CreateOrderPayload) => {
-        const response = await api.post('/orders', payload);
+        const response = await api.post('orders', payload);
         return response.data;
     },
 
-    // Create a new subscription (Legacy)
-    createSubscription: async (payload: CreateSubscriptionPayload) => {
-        const response = await api.post('/subscriptions', payload);
-        return response.data;
-    },
 
-    // Create enhanced subscription (Multi-product)
-    createEnhancedSubscription: async (payload: CreateEnhancedSubscriptionPayload) => {
-        const response = await api.post('/subscriptions', payload);
-        return response.data;
-    },
 
     // Payment Methods
     createPaymentOrder: async (payload: CreatePaymentOrderPayload) => {
-        const response = await api.post('/payments/orders', payload);
+        const response = await api.post('payments/orders', payload);
         return response.data;
     },
 
     verifyPayment: async (payload: VerifyPaymentPayload) => {
-        const response = await api.post('/payments/verify', payload);
+        const response = await api.post('payments/verify', payload);
         return response.data;
     },
 
@@ -107,20 +70,17 @@ export const orderService = {
     },
 
     confirmDelivery: async (orderId: string) => {
-        const response = await api.patch(`/orders/${orderId}/confirm-receipt`);
+        const response = await api.patch(`orders/${orderId}/confirm-receipt`);
         return response.data;
     },
 
     // Cleanup Methods
     deletePendingOrder: async (orderId: string) => {
-        const response = await api.delete(`/orders/${orderId}/pending`);
+        const response = await api.delete(`orders/${orderId}/pending`);
         return response.data;
     },
 
-    deleteSubscription: async (subscriptionId: string) => {
-        const response = await api.delete(`/subscriptions/${subscriptionId}`);
-        return response.data;
-    },
+
 
     // COD Payment Methods
     createCodOrder: async (orderId: string) => {
@@ -128,14 +88,17 @@ export const orderService = {
         return response.data;
     },
 
-    createCodSubscription: async (subscriptionId: string) => {
-        const response = await api.post('/payments/cod/subscription', { subscriptionId });
-        return response.data;
-    },
+
 
     // Get order invoice
     getOrderInvoice: async (orderId: string) => {
-        const response = await api.get(`/orders/${orderId}/invoice`);
+        const response = await api.get(`orders/${orderId}/invoice`);
+        return response.data;
+    },
+
+    // Get Order History
+    getOrders: async () => {
+        const response = await api.get('orders/my-history');
         return response.data;
     }
 };

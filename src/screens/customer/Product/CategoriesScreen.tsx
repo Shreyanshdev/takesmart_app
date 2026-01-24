@@ -1,28 +1,41 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Platform, Image, FlatList } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Platform, Image, FlatList, Dimensions } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
 import { BlurView } from '@react-native-community/blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MonoText } from '../../../components/shared/MonoText';
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';
 import { useHomeStore } from '../../../store/home.store';
 import { useShallow } from 'zustand/react/shallow';
-import { ProductCard } from '../../../components/home/ProductCard';
+import { ProductGridCard } from '../../../components/shared/ProductGridCard';
+import { ProductSkeleton } from '../../../components/shared/ProductSkeleton';
 import { Product } from '../../../services/customer/product.service';
-import { SubscriptionModal } from '../../../components/subscription/SubscriptionModal';
+import { useBranchStore } from '../../../store/branch.store';
+import { useCartStore } from '../../../store/cart.store';
+import { useToastStore } from '../../../store/toast.store';
 import { ProductDetailsModal } from '../../../components/home/ProductDetailsModal';
 import { FloatingCarts } from '../../../components/home/FloatingCarts';
+import { NoServiceScreen } from '../../../components/shared/NoServiceScreen';
 
 type CategoriesScreenRouteProp = RouteProp<{ params: { initialCategory?: string } }, 'params'>;
 
-const HEADER_HEIGHT = Platform.OS === 'ios' ? 90 : 70;
+const HEADER_CONTENT_HEIGHT = 56;
+const HEADER_HEIGHT = HEADER_CONTENT_HEIGHT + 50; // Approximate safe area top
 const SIDEBAR_WIDTH = 90;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// Right content width = screen width - sidebar - spacing
+const RIGHT_CONTENT_WIDTH = SCREEN_WIDTH - SIDEBAR_WIDTH;
+const CARD_WIDTH = (RIGHT_CONTENT_WIDTH - 24) / 2; // 8 padding sides + 8 gap = 24
 
 // Glass Header (Always Visible)
 const CategoriesHeader = ({ navigation, title }: { navigation: any, title: string }) => {
+    const insets = useSafeAreaInsets();
+    const headerHeight = insets.top + HEADER_CONTENT_HEIGHT;
+
     return (
-        <View style={[styles.headerContainer, { backgroundColor: 'rgba(255, 255, 255, 0.85)' }]}>
+        <View style={[styles.headerContainer, { height: headerHeight, paddingTop: insets.top }]}>
             <View style={StyleSheet.absoluteFill}>
                 <BlurView
                     style={StyleSheet.absoluteFill}
@@ -38,10 +51,10 @@ const CategoriesHeader = ({ navigation, title }: { navigation: any, title: strin
                         <Path d="M12 19l-7-7 7-7" />
                     </Svg>
                 </TouchableOpacity>
-                <MonoText size="l" weight="bold" color={colors.text} style={{ marginLeft: spacing.m, flex: 1 }}>{title}</MonoText>
-                {/* Search Icon Placeholder */}
-                <TouchableOpacity onPress={() => navigation.navigate('Search')}>
-                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <MonoText size="l" weight="bold" color={colors.text} style={styles.headerTitle}>{title}</MonoText>
+                {/* Search Icon */}
+                <TouchableOpacity onPress={() => navigation.navigate('Search')} style={styles.searchBtn}>
+                    <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <Circle cx="11" cy="11" r="8" />
                         <Line x1="21" y1="21" x2="16.65" y2="16.65" />
                     </Svg>
@@ -54,19 +67,24 @@ const CategoriesHeader = ({ navigation, title }: { navigation: any, title: strin
 export const CategoriesScreen = () => {
     const navigation = useNavigation<any>();
     const route = useRoute<CategoriesScreenRouteProp>();
+    const insets = useSafeAreaInsets();
+    const dynamicHeaderHeight = insets.top + HEADER_CONTENT_HEIGHT;
 
     // Global State
-    const { categories, subscriptionProducts, normalProducts } = useHomeStore(useShallow(state => ({
+    const { categories, normalProducts, isLoading } = useHomeStore(useShallow(state => ({
         categories: state.categories,
-        subscriptionProducts: state.subscriptionProducts,
         normalProducts: state.normalProducts,
+        isLoading: state.isLoading,
     })));
+
+    const { currentBranch, isServiceAvailable } = useBranchStore();
+    const { addToCart, removeFromCart, getItemQuantity } = useCartStore();
 
     // Local State
     const [selectedCategory, setSelectedCategory] = useState<string>('All');
-    const [subModalVisible, setSubModalVisible] = useState(false);
     const [detailsModalVisible, setDetailsModalVisible] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+    const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
 
     // Initial Selection
     useEffect(() => {
@@ -85,11 +103,8 @@ export const CategoriesScreen = () => {
 
     // Combined Products
     const allProducts = useMemo(() => {
-        // Merge lists
-        const combined = [...subscriptionProducts, ...normalProducts];
-        // Deduplicate
-        return Array.from(new Map(combined.map(item => [item._id, item])).values());
-    }, [subscriptionProducts, normalProducts]);
+        return normalProducts;
+    }, [normalProducts]);
 
     const filteredProducts = useMemo(() => {
         if (!selectedCategory) return [];
@@ -104,27 +119,61 @@ export const CategoriesScreen = () => {
     }, [allProducts, selectedCategory]);
 
     // Handlers
-    const handleSubscribe = (product: Product) => {
+    const handleProductPress = (product: Product, variantId?: string) => {
         setSelectedProduct(product);
-        setSubModalVisible(true);
-    };
-
-    const handleProductPress = (product: Product) => {
-        setSelectedProduct(product);
+        setSelectedVariantId(variantId || null);
         setDetailsModalVisible(true);
     };
 
-    const renderRightItem = ({ item }: { item: Product }) => (
-        <View style={styles.gridItemWrapper}>
-            <ProductCard
-                product={item}
-                isSubscriptionEligible={item.isSubscriptionAvailable}
-                onSubscribe={handleSubscribe}
+    const handleAddToCart = (product: Product, variant: any) => {
+        const cartItemId = variant?._id || variant?.inventoryId || product._id;
+        const productImage = variant?.variant?.images?.[0] || product.images?.[0] || product.image;
+
+        const success = addToCart({
+            ...product,
+            _id: cartItemId,
+            name: product.name,
+            image: productImage || '',
+            price: variant?.pricing?.mrp || 0,
+            discountPrice: variant?.pricing?.sellingPrice || 0,
+            stock: variant?.stock || 0,
+            quantity: variant?.variant ? {
+                value: variant.variant.weightValue,
+                unit: variant.variant.weightUnit
+            } : undefined,
+            formattedQuantity: variant?.variant ? `${variant.variant.weightValue} ${variant.variant.weightUnit}` : undefined
+        } as any);
+        
+        if (!success) {
+            const { useToastStore } = require('../../../store/toast.store');
+            const currentQuantity = getItemQuantity(cartItemId);
+            if (currentQuantity >= (variant?.stock || 0)) {
+                useToastStore.getState().showToast('Maximum stock limit reached!');
+            } else {
+                useToastStore.getState().showToast('Product is out of stock!');
+            }
+        }
+    };
+
+    const renderRightItem = ({ item }: { item: any }) => {
+        const product = item.product || item;
+        const variant = item.variant || product.variants?.[0];
+        const cartItemId = variant?._id || variant?.inventoryId || product._id;
+        const quantity = getItemQuantity(cartItemId);
+
+        return (
+            <ProductGridCard
+                product={product}
+                variant={variant}
+                quantity={quantity}
+                width={CARD_WIDTH}
                 onPress={handleProductPress}
-                style={{ width: '100%' }}
+                onAddToCart={handleAddToCart}
+                onRemoveFromCart={removeFromCart}
+                isSoldOut={!variant?.isAvailable}
             />
-        </View>
-    );
+        );
+    };
 
     const getCategoryName = () => {
         const cat = categories.find(c => c._id === selectedCategory);
@@ -141,7 +190,7 @@ export const CategoriesScreen = () => {
                 <View style={styles.sidebar}>
                     <ScrollView
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{ paddingTop: HEADER_HEIGHT + spacing.m, paddingBottom: 100 }}
+                        contentContainerStyle={{ paddingTop: dynamicHeaderHeight + spacing.m, paddingBottom: 100 }}
                     >
                         {categories.map((cat) => {
                             const isSelected = selectedCategory === cat._id;
@@ -180,24 +229,50 @@ export const CategoriesScreen = () => {
 
                 {/* Right Content */}
                 <View style={styles.rightContent}>
-                    <FlatList
-                        data={filteredProducts}
-                        keyExtractor={(item) => item._id}
-                        renderItem={renderRightItem}
-                        numColumns={2}
-                        contentContainerStyle={{
-                            paddingTop: HEADER_HEIGHT + spacing.m,
-                            paddingHorizontal: spacing.s,
-                            paddingBottom: 120
-                        }}
-                        showsVerticalScrollIndicator={false}
-                        columnWrapperStyle={{ justifyContent: 'space-between' }}
-                        ListEmptyComponent={() => (
-                            <View style={styles.emptyState}>
-                                <MonoText color={colors.textLight}>No products in this category.</MonoText>
-                            </View>
-                        )}
-                    />
+                    {isServiceAvailable && isLoading ? (
+                        <FlatList
+                            data={[1, 2, 3, 4, 5, 6]}
+                            keyExtractor={(i) => `skeleton-${i}`}
+                            renderItem={() => <ProductSkeleton width={CARD_WIDTH} />}
+                            numColumns={2}
+                            contentContainerStyle={{
+                                paddingTop: dynamicHeaderHeight + spacing.m,
+                                paddingHorizontal: 8,
+                                paddingBottom: 120
+                            }}
+                            showsVerticalScrollIndicator={false}
+                            columnWrapperStyle={{ gap: 8 }}
+                        />
+                    ) : !isServiceAvailable ? (
+                        <NoServiceScreen />
+                    ) : (
+                        <FlatList
+                            data={filteredProducts.flatMap(p => {
+                                const variants = (p as any).variants || [];
+                                // Only keep variants that are available in this branch
+                                const availableVariants = variants.filter((v: any) => v.isAvailable);
+
+                                if (availableVariants.length === 0) return [];
+                                if (availableVariants.length === 1) return [p];
+                                return availableVariants.map((v: any) => ({ product: p, variant: v }));
+                            })}
+                            keyExtractor={(item, index) => (item.product?._id || item._id) + (item.variant?.inventoryId || index)}
+                            renderItem={renderRightItem}
+                            numColumns={2}
+                            contentContainerStyle={{
+                                paddingTop: dynamicHeaderHeight + spacing.m,
+                                paddingHorizontal: 8,
+                                paddingBottom: 120
+                            }}
+                            showsVerticalScrollIndicator={false}
+                            columnWrapperStyle={{ gap: 8 }}
+                            ListEmptyComponent={() => (
+                                <View style={styles.emptyState}>
+                                    <MonoText color={colors.textLight}>No products available in this category.</MonoText>
+                                </View>
+                            )}
+                        />
+                    )}
                 </View>
             </View>
 
@@ -207,18 +282,13 @@ export const CategoriesScreen = () => {
                 title={getCategoryName()}
             />
 
-            {/* Modals */}
-            <SubscriptionModal
-                visible={subModalVisible}
-                product={selectedProduct}
-                onClose={() => setSubModalVisible(false)}
-            />
+
 
             <ProductDetailsModal
                 visible={detailsModalVisible}
                 product={selectedProduct}
+                initialVariantId={selectedVariantId}
                 onClose={() => setDetailsModalVisible(false)}
-                onSubscribePress={handleSubscribe}
             />
 
             <FloatingCarts />
@@ -233,21 +303,59 @@ const styles = StyleSheet.create({
     },
     headerContainer: {
         position: 'absolute',
-        top: 5,
+        top: 0,
         left: 0,
         right: 0,
-        height: HEADER_HEIGHT,
         zIndex: 100,
-        justifyContent: 'flex-end',
-        paddingBottom: spacing.s,
+        backgroundColor: 'rgba(255, 255, 255, 0.85)',
     },
     headerContent: {
+        height: HEADER_CONTENT_HEIGHT,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: spacing.l,
+        paddingHorizontal: 16,
     },
     backBtn: {
-        padding: 4,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
+    },
+    headerTitle: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    searchBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
     },
     contentRow: {
         flex: 1,
@@ -308,13 +416,28 @@ const styles = StyleSheet.create({
         borderBottomRightRadius: 4,
     },
     gridItemWrapper: {
-        flex: 1,
-        maxWidth: '48%',
-        marginBottom: spacing.m,
+        width: CARD_WIDTH,
+        marginBottom: 12,
     },
     emptyState: {
         marginTop: spacing.xl,
         alignItems: 'center',
         padding: spacing.l,
-    }
+    },
+    noServiceContainer: {
+        padding: spacing.xl,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 40, // Let the contentContainerStyle handle the top spacing
+    },
+    noServiceTitle: {
+        marginTop: 16,
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    noServiceText: {
+        textAlign: 'center',
+        lineHeight: 18,
+        paddingHorizontal: 10,
+    },
 });

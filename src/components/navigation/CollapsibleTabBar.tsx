@@ -7,15 +7,16 @@ import Animated, {
     useSharedValue,
     withSpring,
 } from 'react-native-reanimated';
-import Svg, { Path, Polyline, Rect, Line } from 'react-native-svg';
+import Svg, { Path, Polyline, Rect, Line, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
-import { spacing } from '../../theme/spacing';
+
 import { MonoText } from '../shared/MonoText';
 import { useHomeStore } from '../../store/home.store';
 import { BlurView } from '@react-native-community/blur';
 
 export const CollapsibleTabBar = ({ state, descriptors, navigation }: BottomTabBarProps) => {
     const isTabBarVisible = useHomeStore(state => state.isTabBarVisible);
+    const awaitingConfirmationCount = useHomeStore(state => state.awaitingConfirmationCount);
     const translateY = useSharedValue(0);
 
     useEffect(() => {
@@ -72,15 +73,7 @@ export const CollapsibleTabBar = ({ state, descriptors, navigation }: BottomTabB
                                         <Polyline points="9 22 9 12 15 12 15 22" />
                                     </Svg>
                                 );
-                            case 'Subscription':
-                                return (
-                                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-                                        <Rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                                        <Line x1="16" y1="2" x2="16" y2="6" />
-                                        <Line x1="8" y1="2" x2="8" y2="6" />
-                                        <Line x1="3" y1="10" x2="21" y2="10" />
-                                    </Svg>
-                                );
+
                             case 'Orders':
                                 return (
                                     <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
@@ -96,6 +89,13 @@ export const CollapsibleTabBar = ({ state, descriptors, navigation }: BottomTabB
                                         <Rect x="14" y="3" width="7" height="7" />
                                         <Rect x="14" y="14" width="7" height="7" />
                                         <Rect x="3" y="14" width="7" height="7" />
+                                    </Svg>
+                                );
+                            case 'Profile':
+                                return (
+                                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+                                        <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                        <Circle cx="12" cy="7" r="4" />
                                     </Svg>
                                 );
                             default:
@@ -116,6 +116,13 @@ export const CollapsibleTabBar = ({ state, descriptors, navigation }: BottomTabB
                         >
                             <View style={{ marginBottom: 4 }}>
                                 {getIcon(route.name, isFocused)}
+                                {route.name === 'Orders' && awaitingConfirmationCount > 0 && (
+                                    <View style={styles.badge}>
+                                        <MonoText size="xs" color="white" weight="bold" style={{ fontSize: 10 }}>
+                                            {awaitingConfirmationCount}
+                                        </MonoText>
+                                    </View>
+                                )}
                             </View>
                             <MonoText
                                 size="xs"
@@ -138,16 +145,22 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
-        elevation: 8,
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: -2,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: {
+                    width: 0,
+                    height: -2,
+                },
+                shadowOpacity: 0.1,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 8,
+            },
+        }),
+        borderTopLeftRadius: 0,
+        borderTopRightRadius: 0,
         overflow: 'hidden',
     },
     contentContainer: {
@@ -171,5 +184,19 @@ const styles = StyleSheet.create({
     },
     activeIcon: {
         backgroundColor: colors.primary,
+    },
+    badge: {
+        position: 'absolute',
+        top: -4,
+        right: -8,
+        backgroundColor: colors.primary,
+        borderRadius: 10,
+        minWidth: 18,
+        height: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: 'white',
+        zIndex: 10,
     }
 });

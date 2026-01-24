@@ -1,7 +1,11 @@
 import { create } from 'zustand';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { storage } from '../services/core/storage';
 import { User } from '../types/auth';
 import { logger } from '../utils/logger';
+
+// Storage key for tracking if address modal was shown after login
+const ADDRESS_MODAL_SHOWN_KEY = '@lush_address_modal_shown';
 
 interface AuthState {
     isAuthenticated: boolean;
@@ -20,12 +24,23 @@ export const useAuthStore = create<AuthState>((set) => ({
     isAuthenticated: false,
     isLoading: true,
     user: null,
-    login: (user) => set({ isAuthenticated: true, user }),
+    login: (user) => {
+        storage.setUser(user);
+        set({ isAuthenticated: true, user });
+    },
     logout: () => {
         storage.clearToken();
+        // Clear address modal flag so it shows on next login
+        AsyncStorage.removeItem(ADDRESS_MODAL_SHOWN_KEY);
         set({ isAuthenticated: false, user: null });
     },
-    updateUser: (updates: Partial<User>) => set((state) => ({ user: state.user ? { ...state.user, ...updates } : null })),
+    updateUser: (updates: Partial<User>) => set((state) => {
+        const updatedUser = state.user ? { ...state.user, ...updates } : null;
+        if (updatedUser) {
+            storage.setUser(updatedUser);
+        }
+        return { user: updatedUser };
+    }),
     initialize: async () => {
         logger.debug('AuthStore', 'Starting initialization...');
 

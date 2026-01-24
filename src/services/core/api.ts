@@ -11,10 +11,10 @@ export const api = axios.create({
 
 // Auth endpoints that should not trigger token refresh
 const AUTH_ENDPOINTS = [
-    '/auth/customer/login',
-    '/auth/delivery-partner/login',
-    '/auth/refresh-token',
-    '/auth/logout'
+    'auth/customer/login',
+    'auth/delivery-partner/login',
+    'auth/refresh-token',
+    'auth/logout'
 ];
 
 // Check if URL is an auth endpoint

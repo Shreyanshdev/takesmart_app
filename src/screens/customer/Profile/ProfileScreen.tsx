@@ -1,346 +1,231 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, TextInput, ScrollView, Modal, ActivityIndicator, Alert, StatusBar, Platform, SafeAreaView } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import Svg, { Path, Circle, Polyline, Line, G } from 'react-native-svg';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Platform, Animated, Dimensions, Alert, Modal } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import Svg, { Path, Circle, Rect, G } from 'react-native-svg';
 import { BlurView } from '@react-native-community/blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MonoText } from '../../../components/shared/MonoText';
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';
 import { useAuthStore } from '../../../store/authStore';
 import { api } from '../../../services/core/api';
-import { storage } from '../../../services/core/storage';
-import { logger } from '../../../utils/logger';
+import { useHomeStore } from '../../../store/home.store';
 
-const APP_VERSION = "0.0.1";
-
-// Icons 
-const Icons = {
-    Back: () => (
-        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <Path d="M19 12H5" />
-            <Path d="M12 19l-7-7 7-7" />
+// Custom Icons for Profile Menu
+const ProfileIcons = {
+    Edit: () => (
+        <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <Path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <Path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
         </Svg>
     ),
-    User: () => (
-        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-            <Circle cx="12" cy="7" r="4" />
+    Wishlist: () => (
+        <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <Path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
         </Svg>
     ),
-    Mail: () => (
-        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <Path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-            <Polyline points="22,6 12,13 2,6" />
+    Orders: () => (
+        <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <Path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+            <Polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+            <Line x1="12" y1="22.08" x2="12" y2="12" />
         </Svg>
     ),
-    Phone: () => (
-        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <Path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-        </Svg>
-    ),
-    MapPin: () => (
-        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-            <Circle cx="12" cy="10" r="3" />
-        </Svg>
-    ),
-    CreditCard: () => (
-        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <Rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-            <Line x1="1" y1="10" x2="23" y2="10" />
-        </Svg>
-    ),
-    Shield: () => (
-        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    Privacy: () => (
+        <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <Path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <Polyline points="9 12 11 14 15 10" />
         </Svg>
     ),
-    ChevronRight: () => (
-        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <Polyline points="9 18 15 12 9 6" />
+    Terms: () => (
+        <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <Rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <Line x1="16" y1="2" x2="16" y2="6" />
+            <Line x1="8" y1="2" x2="8" y2="6" />
+            <Line x1="3" y1="10" x2="21" y2="10" />
         </Svg>
     ),
-    LogOut: () => (
-        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.error} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    Logout: () => (
+        <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
             <Polyline points="16 17 21 12 16 7" />
             <Line x1="21" y1="12" x2="9" y2="12" />
         </Svg>
+    ),
+    ChevronRight: () => (
+        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <Path d="M9 18l6-6-6-6" />
+        </Svg>
     )
 };
 
-// Helper for rect since it's not exported by default sometimes or requires destructuring
-const Rect = ({ x, y, width, height, rx, ry }: any) => (
-    <Path d={`M${Number(x) + Number(rx)} ${y} h${width - 2 * rx} a${rx} ${rx} 0 0 1 ${rx} ${rx} v${height - 2 * ry} a${rx} ${rx} 0 0 1 -${rx} ${rx} h-${width - 2 * rx} a${rx} ${rx} 0 0 1 -${rx} -${rx} v-${height - 2 * ry} a${rx} ${rx} 0 0 1 ${rx} -${rx} z`} />
-    // Fallback path attempt for rect if Rect component issues occur, but Svg usually has Rect. 
-    // Let's use <Path> to be safe if 'react-native-svg' Rect import is flaky in some envs, 
-    // but standard lib has it. I'll stick to Path for the CreditCard Rect to be 100% safe.
-    // Rect path mock: 
-);
+// Simple components for the SVG needs
+const Line = ({ x1, y1, x2, y2, ...props }: any) => <Path d={`M${x1} ${y1}L${x2} ${y2}`} {...props} />;
+const Polyline = ({ points, ...props }: any) => <Path d={`M${points}`} {...props} />;
 
-const CreditCardIcon = () => (
-    <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <Path d="M3 4h18a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
-        <Line x1="1" y1="10" x2="23" y2="10" />
-    </Svg>
-);
-
-
-const LogoutModal = ({ visible, onClose, onConfirm }: { visible: boolean, onClose: () => void, onConfirm: () => void }) => (
-    <Modal
-        visible={visible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={onClose}
-    >
-        <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-                <View style={styles.modalIconBg}>
-                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.error} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                        <Polyline points="16 17 21 12 16 7" />
-                        <Line x1="21" y1="12" x2="9" y2="12" />
-                    </Svg>
-                </View>
-                <MonoText size="l" weight="bold" style={styles.modalTitle}>Log Out?</MonoText>
-                <MonoText size="m" color={colors.textLight} style={styles.modalText}>
-                    Are you sure you want to log out of your account?
-                </MonoText>
-
-                <View style={styles.modalActions}>
-                    <TouchableOpacity style={[styles.modalBtn, styles.cancelBtn]} onPress={onClose}>
-                        <MonoText weight="bold" color={colors.text}>Cancel</MonoText>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.modalBtn, styles.logoutBtn]} onPress={onConfirm}>
-                        <MonoText weight="bold" color={colors.white}>Log Out</MonoText>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </View>
-    </Modal>
-);
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export const ProfileScreen = () => {
     const navigation = useNavigation<any>();
+    const insets = useSafeAreaInsets();
     const { user, logout, updateUser } = useAuthStore();
-
-    const [name, setName] = useState(user?.name || '');
-    const [email, setEmail] = useState(user?.email || '');
-    const [isSaving, setIsSaving] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
+    const setTabBarVisible = useHomeStore(state => state.setTabBarVisible);
     const [logoutModalVisible, setLogoutModalVisible] = useState(false);
 
-    // Fetch latest profile from backend on mount
-    useEffect(() => {
-        const fetchProfile = async () => {
-            try {
-                const response = await api.get('/auth/user');
-                const userData = response.data.user;
-                if (userData) {
-                    // Update local state with fetched data
-                    setName(userData.name || '');
-                    setEmail(userData.email || '');
-                    // Update store and storage with latest data
-                    updateUser({ name: userData.name, email: userData.email });
-                    await storage.setUser({ ...user, ...userData });
+    useFocusEffect(
+        useCallback(() => {
+            const fetchLatestProfile = async () => {
+                try {
+                    const response = await api.get('auth/user');
+                    const userData = response.data?.user;
+                    if (userData) {
+                        updateUser(userData);
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch latest profile:', error);
                 }
-            } catch (error) {
-                logger.error('Failed to fetch profile:', error);
-                // Fallback to stored user data
-                if (user) {
-                    setName(user.name || '');
-                    setEmail(user.email || '');
-                }
-            } finally {
-                setIsLoading(false);
-            }
-        };
-        fetchProfile();
-    }, []);
+            };
 
-    useEffect(() => {
-        if (user && !isLoading) {
-            setName(user.name || '');
-            setEmail(user.email || '');
-        }
-    }, [user, isLoading]);
+            fetchLatestProfile();
+        }, [updateUser])
+    );
 
-    const handleSave = async () => {
-        setIsSaving(true);
-        try {
-            await api.put('/profile', { name, email });
-            updateUser({ name, email });
-            const currentUser = await storage.getUser();
-            // Fallback: If no user in storage, use the current name/email/phone from store/state
-            const updatedUser = currentUser ? { ...currentUser, name, email } : { ...user, name, email };
-            await storage.setUser(updatedUser);
-            Alert.alert("Success", "Profile updated successfully");
-        } catch (error) {
-            logger.error('Profile update error:', error);
-            Alert.alert("Error", "Failed to update profile");
-        } finally {
-            setIsSaving(false);
-        }
-    };
+    const menuItems = [
+        { label: 'Edit Profile', icon: ProfileIcons.Edit, onPress: () => navigation.navigate('EditProfile') },
+        { label: 'My Wishlist', icon: ProfileIcons.Wishlist, onPress: () => navigation.navigate('Wishlist') },
+        { label: 'My Orders', icon: ProfileIcons.Orders, onPress: () => navigation.navigate('OrderHistory') },
+        { label: 'Privacy Policy', icon: ProfileIcons.Privacy, onPress: () => navigation.navigate('PrivacyPolicy') },
+        { label: 'Terms & Conditions', icon: ProfileIcons.Terms, onPress: () => navigation.navigate('Terms') },
+    ];
 
     const handleLogout = async () => {
         setLogoutModalVisible(false);
-        setTimeout(() => {
-            logout();
-        }, 200);
+        setTabBarVisible(true);
+        setTimeout(() => logout(), 200);
+    };
+
+    const toggleLogoutModal = (visible: boolean) => {
+        setLogoutModalVisible(visible);
+        setTabBarVisible(!visible);
     };
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-            {/* Glass Header */}
-            <View style={styles.header}>
-                <BlurView
-                    style={StyleSheet.absoluteFill}
-                    blurType="light"
-                    blurAmount={20}
-                    reducedTransparencyFallbackColor="white"
-                />
-
+            {/* Simple Large Header */}
+            <View style={[styles.header, { paddingTop: insets.top, paddingBottom: 30 }]}>
                 <View style={styles.headerContent}>
                     <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                        <Icons.Back />
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <Path d="M19 12H5" />
+                            <Path d="M12 19l-7-7 7-7" />
+                        </Svg>
                     </TouchableOpacity>
+                    <View style={styles.headerTitleContainer}>
+                        <MonoText size="l" weight="bold" color={colors.white}>My Profile</MonoText>
+                    </View>
+                    <View style={{ width: 40 }} />
+                </View>
 
-                    {/* Profile Info on Right */}
-                    <View style={styles.headerProfile}>
-                        <View style={styles.headerTextInfo}>
-                            <MonoText size="m" weight="bold">{name || 'Guest User'}</MonoText>
-                            <MonoText size="xs" color={colors.textLight}>{user?.phone || ''}</MonoText>
+                <View style={styles.profileSummary}>
+                    <View style={styles.avatarWrapper}>
+                        <View style={styles.avatarGlow} />
+                        <View style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                            <MonoText size="xl" weight="bold" color={colors.white} style={styles.avatarText}>{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</MonoText>
                         </View>
-                        <View style={styles.avatarContainer}>
-                            <MonoText size="m" weight="bold" color={colors.white}>
-                                {name ? name.charAt(0).toUpperCase() : 'U'}
-                            </MonoText>
-                        </View>
+                        <TouchableOpacity style={styles.editBadge} onPress={() => navigation.navigate('EditProfile')}>
+                            <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <Path d="M12 20h9" />
+                                <Path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                            </Svg>
+                        </TouchableOpacity>
+                    </View>
+                    <View style={styles.profileText}>
+                        <MonoText size="xl" weight="bold" color={colors.white} style={styles.textGlow}>{user?.name || 'Guest User'}</MonoText>
+                        <MonoText size="s" color={colors.white} style={[styles.textGlow, { opacity: 0.9, marginTop: 4 }]}>{user?.email || user?.phone || 'Set up your profile'}</MonoText>
                     </View>
                 </View>
             </View>
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-
-                {/* Editable Form */}
-                <View style={styles.section}>
-                    <MonoText size="m" weight="bold" style={styles.sectionTitle}>Personal Details</MonoText>
-
-                    <View style={styles.inputGroup}>
-                        <MonoText size="xs" color={colors.textLight} style={styles.label}>Full Name</MonoText>
-                        <View style={styles.inputContainer}>
-                            <Icons.User />
-                            <TextInput
-                                style={styles.input}
-                                value={name}
-                                onChangeText={setName}
-                                placeholder="Enter your name"
-                                placeholderTextColor={colors.textLight}
-                            />
+                {menuItems.map((item, index) => (
+                    <TouchableOpacity key={index} style={styles.menuItem} onPress={item.onPress}>
+                        <View style={styles.menuItemLeft}>
+                            <item.icon />
+                            <MonoText size="m" weight="medium" style={styles.menuLabel}>{item.label}</MonoText>
                         </View>
-                    </View>
+                        <ProfileIcons.ChevronRight />
+                    </TouchableOpacity>
+                ))}
 
-                    <View style={styles.inputGroup}>
-                        <MonoText size="xs" color={colors.textLight} style={styles.label}>Email Address</MonoText>
-                        <View style={styles.inputContainer}>
-                            <Icons.Mail />
-                            <TextInput
-                                style={styles.input}
-                                value={email}
-                                onChangeText={setEmail}
-                                placeholder="Enter your email"
-                                placeholderTextColor={colors.textLight}
-                                keyboardType="email-address"
-                                autoCapitalize="none"
-                            />
-                        </View>
-                    </View>
-
-                    <View style={[styles.inputGroup, { opacity: 0.7 }]}>
-                        <MonoText size="xs" color={colors.textLight} style={styles.label}>Phone Number</MonoText>
-                        <View style={[styles.inputContainer, { backgroundColor: '#F5F5F5', borderColor: 'transparent' }]}>
-                            <Icons.Phone />
-                            <TextInput
-                                style={[styles.input, { color: colors.textLight }]}
-                                value={user?.phone || ''}
-                                editable={false}
-                            />
-                        </View>
-                    </View>
-
-                    <TouchableOpacity
-                        style={[styles.saveBtn, isSaving && { opacity: 0.7 }]}
-                        onPress={handleSave}
-                        disabled={isSaving}
+                {/* Glassmorphism Logout Button */}
+                <TouchableOpacity
+                    style={styles.glassLogoutBtn}
+                    onPress={() => toggleLogoutModal(true)}
+                    activeOpacity={0.8}
+                >
+                    <BlurView
+                        style={StyleSheet.absoluteFill}
+                        blurType="light"
+                        blurAmount={15}
+                        reducedTransparencyFallbackColor="white"
+                    />
+                    <LinearGradient
+                        colors={['rgba(255, 71, 0, 0.1)', 'rgba(255, 71, 0, 0.05)']}
+                        style={styles.logoutGradient}
                     >
-                        {isSaving ? <ActivityIndicator color={colors.white} /> : <MonoText weight="bold" color={colors.white}>Save Changes</MonoText>}
-                    </TouchableOpacity>
-                </View>
-
-                {/* Additional Info Section */}
-                <View style={styles.section}>
-                    <MonoText size="m" weight="bold" style={styles.sectionTitle}>Additional Info</MonoText>
-
-                    <TouchableOpacity style={styles.menuItem} onPress={() => navigation.navigate('AddressSelection')}>
-                        <View style={styles.menuIconBg}>
-                            <Icons.MapPin />
-                        </View>
-                        <MonoText style={styles.menuText}>My Addresses</MonoText>
-                        <Icons.ChevronRight />
-                    </TouchableOpacity>
-
-
-                    <TouchableOpacity style={styles.menuItem} onPress={() => navigation.navigate('SubscriptionHistory')}>
-                        <View style={[styles.menuIconBg, { backgroundColor: '#E0F2FE' }]}>
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <Circle cx="12" cy="12" r="10" />
-                                <Polyline points="12 6 12 12 16 14" />
-                            </Svg>
-                        </View>
-                        <MonoText style={styles.menuText}>Subscription History</MonoText>
-                        <Icons.ChevronRight />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.menuItem} onPress={() => navigation.navigate('PrivacyPolicy')}>
-                        <View style={styles.menuIconBg}>
-                            <Icons.Shield />
-                        </View>
-                        <MonoText style={styles.menuText}>Privacy Policy</MonoText>
-                        <Icons.ChevronRight />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.menuItem} onPress={() => navigation.navigate('Feedback')}>
-                        <View style={[styles.menuIconBg, { backgroundColor: '#F0F9FF' }]}>
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <Path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-                            </Svg>
-                        </View>
-                        <MonoText style={styles.menuText}>Share Feedback</MonoText>
-                        <Icons.ChevronRight />
-                    </TouchableOpacity>
-                </View>
-
-                {/* Logout */}
-                <TouchableOpacity style={styles.logoutRow} onPress={() => setLogoutModalVisible(true)}>
-                    <Icons.LogOut />
-                    <MonoText weight="bold" color={colors.error}>Log Out</MonoText>
+                        <ProfileIcons.Logout />
+                        <MonoText weight="bold" color={colors.primary} size="m" style={{ marginLeft: 12 }}>Logout Account</MonoText>
+                    </LinearGradient>
                 </TouchableOpacity>
-
-                {/* Version Info */}
-                <View style={styles.versionContainer}>
-                    <MonoText size="xs" color={colors.textLight}>App Version {APP_VERSION}</MonoText>
-                </View>
-
             </ScrollView>
 
-            <LogoutModal
+            {/* Premium Logout Modal */}
+            <Modal
                 visible={logoutModalVisible}
-                onClose={() => setLogoutModalVisible(false)}
-                onConfirm={handleLogout}
-            />
+                transparent
+                animationType="fade"
+                onRequestClose={() => toggleLogoutModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <BlurView
+                        style={StyleSheet.absoluteFill}
+                        blurType="dark"
+                        blurAmount={5}
+                        reducedTransparencyFallbackColor="rgba(0,0,0,0.5)"
+                    />
+                    <TouchableOpacity
+                        style={StyleSheet.absoluteFill}
+                        activeOpacity={1}
+                        onPress={() => toggleLogoutModal(false)}
+                    />
+                    <View style={styles.modalContainer}>
+                        <View style={styles.modalIcon}>
+                            <ProfileIcons.Logout />
+                        </View>
+                        <MonoText size="l" weight="bold">Log Out?</MonoText>
+                        <MonoText style={{ marginVertical: 15, textAlign: 'center', color: colors.textLight }}>
+                            Are you sure you want to log out of your account?
+                        </MonoText>
+                        <View style={styles.modalActions}>
+                            <TouchableOpacity
+                                style={styles.modalCancel}
+                                onPress={() => toggleLogoutModal(false)}
+                            >
+                                <MonoText weight="bold" color={colors.text}>Cancel</MonoText>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.modalConfirm}
+                                onPress={handleLogout}
+                            >
+                                <MonoText weight="bold" color={colors.white}>Log Out</MonoText>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 };
@@ -348,200 +233,200 @@ export const ProfileScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#FAFAFA',
+        backgroundColor: colors.white,
     },
     header: {
-        backgroundColor: 'rgba(255,255,255,0.8)',
-        paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 50,
-        paddingBottom: spacing.m,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(0,0,0,0.05)',
+        backgroundColor: colors.primary,
+        position: 'relative',
         overflow: 'hidden',
     },
     headerContent: {
+        height: 56,
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: spacing.m,
-    },
-    headerProfile: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.s,
-    },
-    headerTextInfo: {
-        alignItems: 'flex-end',
+        paddingHorizontal: 16,
+        zIndex: 20,
     },
     backBtn: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: 'rgba(0,0,0,0.05)',
+        backgroundColor: colors.white,
         alignItems: 'center',
         justifyContent: 'center',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
     },
-    profileCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: spacing.m,
-    },
-    avatarContainer: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: colors.primary,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: spacing.m,
-    },
-    profileInfo: {
+    headerTitleContainer: {
         flex: 1,
+        alignItems: 'center',
+    },
+    profileSummary: {
+        marginTop: 20,
+        alignItems: 'center',
+        zIndex: 10,
+    },
+    avatarWrapper: {
+        position: 'relative',
+        marginBottom: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    avatarGlow: {
+        position: 'absolute',
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        backgroundColor: 'rgba(255, 255, 255, 0.4)',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#fff',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 15,
+            },
+            android: {
+                elevation: 0, // Glow on android is tricky, using semi-transparent overlay
+            },
+        }),
+    },
+    avatar: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        borderWidth: 2,
+        borderColor: 'rgba(255,255,255,0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1,
+    },
+    avatarText: {
+        textShadowColor: 'rgba(255, 255, 255, 0.5)',
+        textShadowOffset: { width: 0, height: 0 },
+        textShadowRadius: 10,
+    },
+    textGlow: {
+        textShadowColor: 'rgba(255, 255, 255, 0.6)',
+        textShadowOffset: { width: 0, height: 0 },
+        textShadowRadius: 8,
+    },
+    editBadge: {
+        position: 'absolute',
+        bottom: 0,
+        right: 0,
+        backgroundColor: colors.white,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: colors.primary,
+        zIndex: 2,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.1,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
+    },
+    profileText: {
+        alignItems: 'center',
     },
     content: {
-        padding: spacing.l,
-        paddingTop: spacing.m,
-    },
-    section: {
-        backgroundColor: colors.white,
-        borderRadius: 16,
-        padding: spacing.m,
-        marginBottom: spacing.l,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 2,
-        elevation: 2,
-    },
-    sectionTitle: {
-        marginBottom: spacing.m,
-    },
-    inputGroup: {
-        marginBottom: spacing.m,
-    },
-    label: {
-        marginBottom: 6,
-        marginLeft: 4,
-    },
-    inputContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#F9FAFB',
-        borderRadius: 12,
-        paddingHorizontal: spacing.m,
-        height: 50,
-        borderWidth: 1,
-        borderColor: '#E5E7EB',
-    },
-    input: {
-        flex: 1,
-        marginLeft: spacing.s,
-        fontSize: 15,
-        color: colors.text,
-    },
-    saveBtn: {
-        backgroundColor: colors.black,
-        height: 50,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: spacing.s,
-        shadowColor: colors.black,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        paddingHorizontal: spacing.l,
+        paddingTop: 10,
+        paddingBottom: 40,
     },
     menuItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: spacing.m + 4,
+        justifyContent: 'space-between',
+        paddingVertical: 20,
         borderBottomWidth: 1,
-        borderBottomColor: '#F3F4F6',
+        borderBottomColor: '#f5f5f5',
     },
-    menuIconBg: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: '#F0FDF4', // Light green matches theme
+    menuItemLeft: {
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: spacing.m,
     },
-    menuText: {
-        flex: 1,
-        fontSize: 15,
+    menuLabel: {
+        marginLeft: 15,
         color: colors.text,
-        fontWeight: '500',
     },
-    logoutRow: {
+    glassLogoutBtn: {
+        marginTop: 40,
+        height: 60,
+        borderRadius: 20,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 71, 0, 0.2)',
+    },
+    logoutGradient: {
+        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: spacing.s,
-        padding: spacing.m,
-        backgroundColor: '#FEF2F2',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#FECACA',
-        marginBottom: spacing.xl,
+        paddingHorizontal: 20,
     },
-    versionContainer: {
-        alignItems: 'center',
-        paddingBottom: spacing.xl,
-    },
-
-    // Modal
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: spacing.l,
     },
-    modalContent: {
-        backgroundColor: colors.white,
-        borderRadius: 24,
-        padding: spacing.l,
-        width: '100%',
+    modalContainer: {
+        position: 'absolute',
+        top: '40%',
+        left: '10%',
+        right: '10%',
+        backgroundColor: 'white',
+        borderRadius: 20,
+        padding: 24,
         alignItems: 'center',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 12,
-        elevation: 8,
+        elevation: 10,
     },
-    modalIconBg: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
+    modalIcon: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
         backgroundColor: '#FEF2F2',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: spacing.m,
-    },
-    modalTitle: {
-        marginBottom: spacing.xs,
-    },
-    modalText: {
-        textAlign: 'center',
-        marginBottom: spacing.l,
+        marginBottom: 16,
     },
     modalActions: {
         flexDirection: 'row',
-        gap: spacing.m,
+        gap: 12,
+        marginTop: 20,
         width: '100%',
     },
-    modalBtn: {
+    modalCancel: {
         flex: 1,
         height: 50,
+        backgroundColor: '#f5f5f5',
         borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    cancelBtn: {
-        backgroundColor: '#F3F4F6',
+    modalConfirm: {
+        flex: 1,
+        height: 50,
+        backgroundColor: colors.primary,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    logoutBtn: {
-        backgroundColor: colors.error,
-    }
 });

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { BlurView } from '@react-native-community/blur';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
@@ -13,7 +14,8 @@ interface AvailableOrderCardProps {
 
 export const AvailableOrderCard: React.FC<AvailableOrderCardProps> = ({ order, onPress }) => {
     const customerName = order.customer?.name || 'Customer';
-    const itemCount = order.items.reduce((sum, item) => sum + item.count, 0);
+    // Use itemCount from API, fallback to calculating from items if available (for safety)
+    const itemCount = order.itemCount ?? (order.items?.reduce((sum, item) => sum + (item.quantity || item.count || 0), 0) || 0);
     const address = order.deliveryLocation.address;
     const truncatedAddress = address.length > 50 ? address.substring(0, 50) + '...' : address;
 
@@ -31,142 +33,228 @@ export const AvailableOrderCard: React.FC<AvailableOrderCardProps> = ({ order, o
     };
 
     return (
-        <TouchableOpacity
-            style={styles.container}
-            onPress={() => onPress(order)}
-            activeOpacity={0.7}
-        >
-            {/* Header Row */}
-            <View style={styles.headerRow}>
-                <View style={styles.orderInfo}>
-                    <View style={styles.orderIdBadge}>
-                        <MonoText size="xs" weight="bold" color={colors.primary}>
-                            #{order.orderId}
+        <View style={styles.cardWrapper}>
+            <TouchableOpacity
+                style={styles.container}
+                onPress={() => onPress(order)}
+                activeOpacity={0.8}
+            >
+                <BlurView
+                    style={StyleSheet.absoluteFill}
+                    blurType="light"
+                    blurAmount={20}
+                    reducedTransparencyFallbackColor="white"
+                />
+
+                {/* Content Layer */}
+                <View style={styles.content}>
+                    {/* Header Row */}
+                    <View style={styles.headerRow}>
+                        <View style={styles.orderInfo}>
+                            <View style={styles.orderIdBadgeNeoglass}>
+                                <MonoText size="xs" weight="bold" color={colors.primary}>
+                                    #{order.orderId}
+                                </MonoText>
+                            </View>
+                            <View style={styles.timeBadge}>
+                                <MonoText size="xxs" color={colors.textLight} weight="semiBold">
+                                    {getTimeAgo(order.createdAt)}
+                                </MonoText>
+                            </View>
+                        </View>
+                        <View style={styles.paymentContainer}>
+                            {order.paymentDetails?.paymentMethod === 'cod' ? (
+                                <View style={styles.codBadge}>
+                                    <MonoText size="xxs" weight="bold" color={colors.warning}>
+                                        COD Collect ₹{order.totalPrice}
+                                    </MonoText>
+                                </View>
+                            ) : (
+                                <View style={styles.prepaidBadge}>
+                                    <MonoText size="xxs" weight="bold" color={colors.success}>
+                                        {order.paymentDetails?.paymentMethod === 'online' ? 'ONLINE PREPAID' : 'PREPAID'}
+                                    </MonoText>
+                                </View>
+                            )}
+                        </View>
+                    </View>
+
+                    {/* Customer & Items */}
+                    <View style={styles.detailsRow}>
+                        <View style={styles.customerIcon}>
+                            <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
+                                <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                <Circle cx="12" cy="7" r="4" />
+                            </Svg>
+                        </View>
+                        <View style={styles.customerInfo}>
+                            <MonoText size="m" weight="bold">
+                                {customerName}
+                            </MonoText>
+                            <View style={styles.itemCountBadge}>
+                                <MonoText size="xxs" color={colors.textLight} weight="bold">
+                                    {itemCount} {itemCount === 1 ? 'ITEM' : 'ITEMS'}
+                                </MonoText>
+                            </View>
+                        </View>
+
+                        <View style={styles.typeBadge}>
+                            <MonoText size="xxs" weight="bold" color={colors.success}>AVAILABLE</MonoText>
+                        </View>
+                    </View>
+
+                    {/* Address Row */}
+                    <View style={styles.addressRow}>
+                        <View style={styles.locationIcon}>
+                            <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2.5">
+                                <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                <Circle cx="12" cy="10" r="3" />
+                            </Svg>
+                        </View>
+                        <MonoText size="s" color={colors.text} numberOfLines={2} style={styles.addressText}>
+                            {truncatedAddress}
                         </MonoText>
                     </View>
-                    <MonoText size="xxs" color={colors.textLight}>
-                        {getTimeAgo(order.createdAt)}
-                    </MonoText>
-                </View>
-                <View style={styles.priceBadge}>
-                    <MonoText size="s" weight="bold" color={colors.white}>
-                        ₹{order.totalPrice}
-                    </MonoText>
-                </View>
-            </View>
 
-            {/* Customer & Items */}
-            <View style={styles.detailsRow}>
-                <View style={styles.customerIcon}>
-                    <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
-                        <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                        <Circle cx="12" cy="7" r="4" />
-                    </Svg>
+                    {/* Action Hint */}
+                    <View style={styles.footerRow}>
+                        <View style={styles.actionHint}>
+                            <MonoText size="xs" weight="bold" color={colors.primary}>
+                                View Details
+                            </MonoText>
+                            <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3" style={{ marginLeft: 4 }}>
+                                <Path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                            </Svg>
+                        </View>
+                    </View>
                 </View>
-                <View style={styles.customerInfo}>
-                    <MonoText size="m" weight="semiBold" numberOfLines={1}>
-                        {customerName}
-                    </MonoText>
-                    <MonoText size="xs" color={colors.textLight}>
-                        {itemCount} {itemCount === 1 ? 'item' : 'items'}
-                    </MonoText>
-                </View>
-            </View>
-
-            {/* Address Row */}
-            <View style={styles.addressRow}>
-                <View style={styles.locationIcon}>
-                    <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2">
-                        <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                        <Circle cx="12" cy="10" r="3" />
-                    </Svg>
-                </View>
-                <MonoText size="xs" color={colors.text} numberOfLines={2} style={styles.addressText}>
-                    {truncatedAddress}
-                </MonoText>
-            </View>
-
-            {/* Action Hint */}
-            <View style={styles.actionHint}>
-                <MonoText size="xs" weight="semiBold" color={colors.primary}>
-                    Tap to view details →
-                </MonoText>
-            </View>
-        </TouchableOpacity>
+            </TouchableOpacity>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        backgroundColor: colors.white,
-        borderRadius: 16,
-        padding: spacing.m,
+    cardWrapper: {
         marginBottom: spacing.m,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-        elevation: 3,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.05,
+                shadowRadius: 12,
+            },
+            android: {
+                elevation: 4,
+            },
+        }),
+    },
+    container: {
+        borderRadius: 22,
+        overflow: 'hidden',
         borderWidth: 1,
-        borderColor: colors.border,
+        borderColor: 'rgba(0, 0, 0, 0.05)',
+    },
+    content: {
+        padding: 17,
+        backgroundColor: 'rgba(255, 255, 255, 0.7)',
     },
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: spacing.s,
+        marginBottom: 13,
+    },
+    paymentContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    codBadge: {
+        backgroundColor: 'rgba(234, 179, 8, 0.1)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(234, 179, 8, 0.2)',
+    },
+    prepaidBadge: {
+        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(34, 197, 94, 0.2)',
     },
     orderInfo: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: spacing.s,
+        gap: 10,
     },
-    orderIdBadge: {
-        backgroundColor: `${colors.primary}20`,
-        paddingHorizontal: spacing.s,
+    orderIdBadgeNeoglass: {
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 9,
+        borderWidth: 1.5,
+        borderColor: colors.primary,
+        borderStyle: 'dashed',
+        backgroundColor: 'rgba(255, 71, 0, 0.05)',
+    },
+    timeBadge: {
+        backgroundColor: 'rgba(0, 0, 0, 0.03)',
+        paddingHorizontal: 8,
         paddingVertical: 4,
-        borderRadius: 8,
-    },
-    priceBadge: {
-        backgroundColor: colors.accent,
-        paddingHorizontal: spacing.m,
-        paddingVertical: 6,
-        borderRadius: 20,
+        borderRadius: 6,
     },
     detailsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: spacing.s,
+        marginBottom: 13,
     },
     customerIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: `${colors.primary}15`,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255, 71, 0, 0.08)',
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: spacing.s,
+        marginRight: 12,
     },
     customerInfo: {
         flex: 1,
     },
+    itemCountBadge: {
+        marginTop: 2,
+    },
+    typeBadge: {
+        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+    },
     addressRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        backgroundColor: '#F8F9FA',
-        padding: spacing.s,
-        borderRadius: 10,
-        marginBottom: spacing.s,
+        backgroundColor: 'rgba(0, 0, 0, 0.02)',
+        padding: 10,
+        borderRadius: 12,
+        marginBottom: 12,
     },
     locationIcon: {
-        marginRight: spacing.xs,
+        marginRight: 10,
         marginTop: 2,
     },
     addressText: {
         flex: 1,
         lineHeight: 18,
     },
-    actionHint: {
+    footerRow: {
         alignItems: 'flex-end',
+    },
+    actionHint: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255, 71, 0, 0.08)',
+        paddingHorizontal: 14,
+        paddingVertical: 7,
+        borderRadius: 12,
     },
 });

@@ -2,49 +2,151 @@ import { Alert } from 'react-native';
 import RNPrint from 'react-native-print';
 import { logger } from '../../utils/logger';
 
+// --- Types ---
 interface InvoiceItem {
     name: string;
+    description?: string;
+    hsn?: string;
     quantity: number;
-    unitPrice: number;
-    total: number;
+    unit: string;
+    rate: number;
+    amount: number;
+    discount?: number;
+    packetSize?: string;
+    qtyPerDelivery?: number;
+    totalDeliveries?: number;
+}
+
+interface TaxInfo {
+    taxableValue: number;
+    sgstRate: number;
+    sgstAmount: number;
+    cgstRate: number;
+    cgstAmount: number;
 }
 
 interface InvoiceData {
-    invoiceNumber: string;
-    orderNumber: string;
-    orderDate: Date | string;
-    customerName: string;
-    customerPhone?: string;
-    deliveryAddress: string;
-    branchName: string;
-    branchAddress?: string;
+    invoiceNo: string;
+    date: Date | string;
+    sellerName: string;
+    sellerAddress: string;
+    sellerGstin: string;
+    sellerState: string;
+    sellerStateCode: string;
+    buyerName: string;
+    buyerAddress: string;
+    buyerGstin?: string;
+    buyerState?: string;
+    buyerStateCode?: string;
     items: InvoiceItem[];
-    subtotal: number;
-    deliveryFee: number;
-    grandTotal: number;
-    paymentMethod: 'COD' | 'Online' | string;
-    isPaid: boolean;
+    totalAmount: number;
+    totalAmountWords: string;
+    taxInfo: TaxInfo;
+    isSubscription: boolean;
+    subscriptionPeriod?: string;
+    deliveryFee?: number;
+    paymentMethod?: string;
+    mrpTotal?: number;
+    productDiscount?: number;
+    couponCode?: string;
+    couponDiscount?: number;
 }
+
+// --- Utils ---
+const formatCurrency = (amount: number) => {
+    return amount.toLocaleString('en-IN', {
+        maximumFractionDigits: 2,
+        minimumFractionDigits: 2
+    });
+};
 
 const formatDate = (date: Date | string): string => {
     const d = new Date(date);
     return d.toLocaleDateString('en-IN', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
+        day: '2-digit',
+        month: 'short',
+        year: '2-digit'
     });
 };
 
-const generateInvoiceHTML = (data: InvoiceData): string => {
-    const itemsHTML = data.items.map((item, index) => `
-        <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #f0f0f0;">${index + 1}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #f0f0f0;">${item.name}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: center;">₹${item.unitPrice}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: center;">${item.quantity}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: right; font-weight: 600;">₹${item.total}</td>
+const calculateSessionYear = (dateInput: Date | string): string => {
+    const date = new Date(dateInput);
+    const year = date.getFullYear();
+    const month = date.getMonth(); // 0 = Jan, 3 = April
+
+    // Fiscal year starts April 1st
+    // If month is Jan(0), Feb(1), Mar(2) -> Session is (Year-1)-Year
+    // If month is Apr(3) or later -> Session is Year-(Year+1)
+
+    let startYear = year;
+    let endYear = year + 1;
+
+    if (month < 3) {
+        startYear = year - 1;
+        endYear = year;
+    }
+
+    // Format: 24-25
+    return `${startYear.toString().slice(-2)}-${endYear.toString().slice(-2)}`;
+};
+
+const numberToWords = (num: number): string => {
+    const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
+    const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+    const inWords = (n: number): string => {
+        if ((n = n.toString() as any).length > 9) return 'overflow';
+        const nArr: any[] = ('000000000' + n).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/) || [];
+        if (!nArr) return '';
+        let str = '';
+        str += (nArr[1] != 0) ? (a[Number(nArr[1])] || b[nArr[1][0]] + ' ' + a[nArr[1][1]]) + 'Crore ' : '';
+        str += (nArr[2] != 0) ? (a[Number(nArr[2])] || b[nArr[2][0]] + ' ' + a[nArr[2][1]]) + 'Lakh ' : '';
+        str += (nArr[3] != 0) ? (a[Number(nArr[3])] || b[nArr[3][0]] + ' ' + a[nArr[3][1]]) + 'Thousand ' : '';
+        str += (nArr[4] != 0) ? (a[Number(nArr[4])] || b[nArr[4][0]] + ' ' + a[nArr[4][1]]) + 'Hundred ' : '';
+        str += (nArr[5] != 0) ? ((str != '') ? 'and ' : '') + ({
+            0: '',
+            1: 'One',
+            2: 'Two',
+            3: 'Three',
+            4: 'Four',
+            5: 'Five',
+            6: 'Six',
+            7: 'Seven',
+            8: 'Eight',
+            9: 'Nine',
+            10: 'Ten',
+            11: 'Eleven',
+            12: 'Twelve',
+            13: 'Thirteen',
+            14: 'Fourteen',
+            15: 'Fifteen',
+            16: 'Sixteen',
+            17: 'Seventeen',
+            18: 'Eighteen',
+            19: 'Nineteen'
+        }[Number(nArr[5])] || b[nArr[5][0]] + ' ' + a[nArr[5][1]]) + ' ' : '';
+        return str;
+    };
+
+    const wholePart = Math.floor(num);
+    const decimalPart = Math.round((num - wholePart) * 100);
+
+    let result = inWords(wholePart) + 'Rupees ';
+    if (decimalPart > 0) {
+        result += 'and ' + inWords(decimalPart) + 'Paise ';
+    }
+    return result + 'Only';
+};
+
+// --- HTML Generator ---
+const generateFormalInvoiceHTML = (data: InvoiceData): string => {
+
+
+    // Fill empty rows to make the table look full
+    const emptyRowsCount = Math.max(0, 5 - data.items.length);
+    const emptyRows = Array(emptyRowsCount).fill(0).map(() => `
+        <tr style="height: 24px;">
+            <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
         </tr>
     `).join('');
 
@@ -53,463 +155,471 @@ const generateInvoiceHTML = (data: InvoiceData): string => {
     <html>
     <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Invoice - ${data.invoiceNumber}</title>
+        <title>Tax Invoice</title>
         <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: Arial, sans-serif; 
-                font-size: 14px; 
-                color: #333;
-                background: #fff;
-                padding: 30px;
-            }
-            .header { 
-                display: flex; 
-                justify-content: space-between; 
-                align-items: flex-start;
-                margin-bottom: 30px;
-                padding-bottom: 15px;
-                border-bottom: 3px solid #EF4444;
-            }
-            .brand-name { 
-                font-size: 28px; 
-                font-weight: 700; 
-                color: #EF4444;
-                margin-bottom: 4px;
-            }
-            .brand-tagline { 
-                font-size: 12px; 
-                color: #666;
-            }
-            .brand-email { 
-                font-size: 12px; 
-                color: #888;
-                margin-top: 8px;
-            }
-            .invoice-title { 
-                font-size: 24px; 
-                font-weight: 700; 
-                color: #333;
-                margin-bottom: 8px;
-                text-align: right;
-            }
-            .invoice-number { 
-                font-size: 14px; 
-                color: #666;
-                text-align: right;
-            }
-            .invoice-date { 
-                font-size: 12px; 
-                color: #888;
-                margin-top: 4px;
-                text-align: right;
-            }
-            .info-section { 
-                display: flex; 
-                justify-content: space-between; 
-                margin-bottom: 25px;
-                gap: 20px;
-            }
-            .info-box { 
-                flex: 1;
-                background: #f9f9f9;
-                padding: 15px;
-                border-radius: 8px;
-            }
-            .info-label { 
-                font-size: 11px; 
-                color: #888;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                margin-bottom: 8px;
-            }
-            .info-value { 
-                font-size: 14px; 
-                font-weight: 600;
-                color: #333;
-            }
-            .info-address { 
-                font-size: 12px; 
-                color: #666;
-                margin-top: 4px;
-                line-height: 1.5;
-            }
-            .items-table { 
-                width: 100%; 
-                border-collapse: collapse;
-                margin-bottom: 25px;
-            }
-            .items-table th { 
-                background: #EF4444;
-                color: white;
-                padding: 12px;
-                text-align: left;
-                font-weight: 600;
-                font-size: 12px;
-                text-transform: uppercase;
-            }
-            .items-table th:nth-child(3),
-            .items-table th:nth-child(4) { text-align: center; }
-            .items-table th:last-child { text-align: right; }
-            .summary-section { 
-                margin-left: auto;
-                width: 250px;
-            }
-            .summary-row { 
-                display: flex; 
-                justify-content: space-between;
-                padding: 8px 0;
-                border-bottom: 1px solid #f0f0f0;
-            }
-            .summary-label { color: #666; }
-            .summary-value { font-weight: 500; }
-            .grand-total { 
-                display: flex; 
-                justify-content: space-between;
-                padding: 14px;
-                background: #EF4444;
-                color: white;
-                border-radius: 8px;
-                margin-top: 10px;
-            }
-            .grand-total-label { font-size: 14px; font-weight: 600; }
-            .grand-total-value { font-size: 18px; font-weight: 700; }
-            .payment-status { 
-                text-align: center;
-                margin-top: 25px;
-                padding: 14px;
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 14px;
-            }
-            .payment-paid { 
-                background: #D1FAE5;
-                color: #065F46;
-            }
-            .payment-cod { 
-                background: #FEF3C7;
-                color: #92400E;
-            }
-            .footer { 
-                margin-top: 30px;
-                padding-top: 15px;
-                border-top: 1px solid #eee;
-                text-align: center;
-                color: #888;
-                font-size: 11px;
-            }
+            body { font-family: 'Times New Roman', Times, serif; font-size: 11px; color: #000; padding: 20px; line-height: 1.3; }
+            table { width: 100%; border-collapse: collapse; border: 1px solid #000; }
+            th, td { border: 1px solid #000; padding: 4px 6px; vertical-align: top; }
+            .no-border-table td { border: none; }
+            .no-border { border: none; }
+            .bold { font-weight: bold; }
+            .right { text-align: right; }
+            .center { text-align: center; }
+            .header-title { text-align: center; font-size: 14px; font-weight: bold; text-decoration: underline; margin-bottom: 5px; }
+            .company-name { font-size: 16px; font-weight: bold; }
+            .small-text { font-size: 10px; }
+            
+            /* Specific Section Styles */
+            .header-info-table td { width: 50%; }
+            .items-table th { background-color: #f0f0f0; text-align: center; }
+            .tax-table th { background-color: #f0f0f0; font-size: 10px; }
+            .amount-words-row { border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 6px; font-weight: bold; font-style: italic; background-color: #f9f9f9; }
+            .footer-sign { height: 60px; vertical-align: bottom; text-align: right; padding-right: 20px; }
         </style>
     </head>
     <body>
-        <div class="header">
-            <div>
-                <div class="brand-name">LushandPure</div>
-                <div class="brand-tagline">Fresh & Pure Dairy Delivered</div>
-                <div class="brand-email">contact@lushandpures.com</div>
-            </div>
-            <div>
-                <div class="invoice-title">INVOICE</div>
-                <div class="invoice-number">${data.invoiceNumber}</div>
-                <div class="invoice-date">${formatDate(data.orderDate)}</div>
-            </div>
-        </div>
+        <div class="header-title">Tax Invoice</div>
+        
+        <!-- Header Info -->
+        <table>
+            <tr>
+                <td style="width: 50%;">
+                    <div class="company-name">${data.sellerName}</div>
+                    <div>${data.sellerAddress}</div>
+                    <div>GSTIN/UIN: <span class="bold">${data.sellerGstin}</span></div>
+                    <div>State Name: ${data.sellerState}, Code: ${data.sellerStateCode}</div>
+                </td>
+                <td style="width: 50%; padding: 0;">
+                    <table class="no-border-table" style="width: 100%; height: 100%;">
+                        <tr>
+                            <td style="border-bottom: 1px solid #000; border-right: 1px solid #000;">Invoice No.<br/><span class="bold">${data.invoiceNo}</span></td>
+                            <td style="border-bottom: 1px solid #000;">Dated<br/><span class="bold">${formatDate(data.date)}</span></td>
+                        </tr>
+                        <tr>
+                            <td style="border-bottom: 1px solid #000; border-right: 1px solid #000;">Delivery Note<br/>&nbsp;</td>
+                            <td style="border-bottom: 1px solid #000;">Mode/Terms of Payment<br/>${data.isSubscription ? `Subscription - ${data.paymentMethod || 'Online'}` : (data.paymentMethod || 'Immediate')}</td>
+                        </tr>
+                        <tr>
+                            <td style="border-right: 1px solid #000;">Reference No. & Date.<br/>&nbsp;</td>
+                            <td>Other References<br/>&nbsp;</td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
 
-        <div class="info-section">
-            <div class="info-box">
-                <div class="info-label">Bill To</div>
-                <div class="info-value">${data.customerName}</div>
-                ${data.customerPhone ? `<div class="info-address">📞 ${data.customerPhone}</div>` : ''}
-                <div class="info-address">📍 ${data.deliveryAddress}</div>
-            </div>
-            <div class="info-box">
-                <div class="info-label">From Branch</div>
-                <div class="info-value">${data.branchName}</div>
-                ${data.branchAddress ? `<div class="info-address">${data.branchAddress}</div>` : ''}
-            </div>
-        </div>
+        <!-- Buyer/Consignee Info -->
+        <table>
+             <tr>
+                <td style="width: 50%; border-top: none;">
+                    <div class="small-text">Buyer (Bill to)</div>
+                    <div class="bold">${data.buyerName}</div>
+                    <div>${data.buyerAddress}</div>
+                    <div>GSTIN/UIN: ${data.buyerGstin || 'Unregistered'}</div>
+                    <div>State Name: ${data.buyerState || data.sellerState}, Code: ${data.buyerStateCode || data.sellerStateCode}</div>
+                </td>
+                <td style="width: 50%; border-top: none;">
+                     <div class="small-text">Consignee (Ship to)</div>
+                    <div class="bold">${data.buyerName}</div>
+                    <div>${data.buyerAddress}</div>
+                    <div>GSTIN/UIN: ${data.buyerGstin || 'Unregistered'}</div>
+                    <div>State Name: ${data.buyerState || data.sellerState}, Code: ${data.buyerStateCode || data.sellerStateCode}</div>
+                </td>
+            </tr>
+        </table>
 
-        <table class="items-table">
+        <!-- Items Table -->
+        <table class="items-table" style="border-top: none;">
             <thead>
                 <tr>
-                    <th style="width: 40px;">#</th>
-                    <th>Item Description</th>
-                    <th style="width: 80px;">Price</th>
-                    <th style="width: 60px;">Qty</th>
-                    <th style="width: 90px;">Amount</th>
+                    <th style="width: 30px;">Sl No</th>
+                    <th>Description of Goods</th>
+                    <th style="width: 60px;">HSN/SAC</th>
+                    ${data.isSubscription ? `
+                    <th style="width: 70px;">Packet Size</th>
+                    <th style="width: 40px;">Qty/Del</th>
+                    <th style="width: 40px;">Total Del</th>
+                    ` : `
+                    <th style="width: 70px;">Count</th>
+                    `}
+                    <th style="width: 80px;">Rate</th>
+                    ${!data.isSubscription ? '<th style="width: 40px;">Disc %</th>' : ''}
+                    <th style="width: 80px;">Amount</th>
                 </tr>
             </thead>
             <tbody>
-                ${itemsHTML}
+                ${data.items.map((item, index) => `
+                    <tr>
+                        <td class="center">${index + 1}</td>
+                        <td><span class="bold">${item.name}</span><br/>${item.description || ''}</td>
+                        <td class="center">${item.hsn || ''}</td>
+                         ${data.isSubscription ? `
+                        <td class="center">${item.packetSize}</td>
+                        <td class="center">${item.qtyPerDelivery}</td>
+                        <td class="center">${item.totalDeliveries}</td>
+                        ` : `
+                        <td class="center bold">${item.quantity}</td>
+                        `}
+                        <td class="center">${item.rate.toFixed(2)}</td>
+                        ${!data.isSubscription ? `<td class="center">${item.discount ? item.discount + '%' : 'N/A'}</td>` : ''}
+                        <td class="right bold">${formatCurrency(item.amount)}</td>
+                    </tr>
+                `).join('')}
+                ${emptyRows}
+                
+                <!-- Summary/Totals Section -->
+                 <tr>
+                    <td colspan="4" class="right bold">Total ${data.isSubscription ? 'Quantity' : 'Count'}: ${data.isSubscription ? data.items.reduce((s, i) => s + i.quantity, 0).toFixed(2) : data.items.reduce((s, i) => s + i.quantity, 0)}</td>
+                    <td colspan="${data.isSubscription ? 3 : 2}" class="right">Taxable Value</td>
+                    <td class="right">${formatCurrency(data.taxInfo.taxableValue)}</td>
+                </tr>
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right">Add: CGST @ ${data.taxInfo.cgstRate}%</td>
+                    <td class="right">${formatCurrency(data.taxInfo.cgstAmount)}</td>
+                </tr>
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right">Add: SGST @ ${data.taxInfo.sgstRate}%</td>
+                    <td class="right">${formatCurrency(data.taxInfo.sgstAmount)}</td>
+                </tr>
+                ${data.mrpTotal ? `
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right">Item Total (MRP)</td>
+                    <td class="right">${formatCurrency(data.mrpTotal)}</td>
+                </tr>
+                ` : ''}
+                ${data.productDiscount && data.productDiscount > 0 ? `
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right" style="color: green;">Product Discount (-)</td>
+                    <td class="right" style="color: green;">${formatCurrency(data.productDiscount)}</td>
+                </tr>
+                ` : ''}
+                ${data.couponDiscount && data.couponDiscount > 0 ? `
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right" style="color: green;">Coupon Discount (${data.couponCode || 'PROMO'}) (-)</td>
+                    <td class="right" style="color: green;">${formatCurrency(data.couponDiscount)}</td>
+                </tr>
+                ` : ''}
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right">Add: Delivery Charges</td>
+                    <td class="right">${formatCurrency(data.deliveryFee || 0)}</td>
+                </tr>
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right">Taxable Value</td>
+                    <td class="right">${formatCurrency(data.taxInfo.taxableValue)}</td>
+                </tr>
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right">Add: CGST @ ${data.taxInfo.cgstRate}%</td>
+                    <td class="right">${formatCurrency(data.taxInfo.cgstAmount)}</td>
+                </tr>
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right">Add: SGST @ ${data.taxInfo.sgstRate}%</td>
+                    <td class="right">${formatCurrency(data.taxInfo.sgstAmount)}</td>
+                </tr>
+                <tr>
+                    <td colspan="${data.isSubscription ? 7 : 6}" class="right bold" style="background-color: #f0f0f0;">Grand Total (Total Paid)</td>
+                    <td class="right bold" style="background-color: #f0f0f0;">${formatCurrency(data.totalAmount)}</td>
+                </tr>
             </tbody>
         </table>
 
-        <div class="summary-section">
-            <div class="summary-row">
-                <span class="summary-label">Subtotal</span>
-                <span class="summary-value">₹${data.subtotal}</span>
-            </div>
-            <div class="summary-row">
-                <span class="summary-label">Delivery Fee</span>
-                <span class="summary-value">${data.deliveryFee === 0 ? 'FREE' : `₹${data.deliveryFee}`}</span>
-            </div>
-            <div class="grand-total">
-                <span class="grand-total-label">Grand Total</span>
-                <span class="grand-total-value">₹${data.grandTotal}</span>
-            </div>
+        <!-- Amount In Words -->
+        <div style="border: 1px solid #000; border-top: none; padding: 5px;">
+            <span class="small-text">Amount Chargeable (in words)</span><br/>
+            <span class="bold">${data.totalAmountWords}</span>
         </div>
 
-        <div class="payment-status ${data.isPaid ? 'payment-paid' : 'payment-cod'}">
-            ${data.isPaid ? '✓ PAID VIA ONLINE PAYMENT' : '💵 CASH ON DELIVERY'}
-        </div>
+        <!-- Tax Table -->
+        <table class="tax-table" style="border-top: none;">
+            <thead>
+                <tr>
+                    <th rowspan="2">HSN/SAC</th>
+                    <th rowspan="2">Taxable Value</th>
+                    <th colspan="2">Central Tax</th>
+                    <th colspan="2">State Tax</th>
+                    <th rowspan="2">Total Tax Amount</th>
+                </tr>
+                <tr>
+                    <th>Rate</th>
+                    <th>Amount</th>
+                    <th>Rate</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                 <tr>
+                    <td class="center">${data.items[0]?.hsn || ''}</td>
+                    <td class="right">${formatCurrency(data.taxInfo.taxableValue)}</td>
+                    <td class="center">${data.taxInfo.cgstRate}%</td>
+                    <td class="right">${formatCurrency(data.taxInfo.cgstAmount)}</td>
+                    <td class="center">${data.taxInfo.sgstRate}%</td>
+                    <td class="right">${formatCurrency(data.taxInfo.sgstAmount)}</td>
+                    <td class="right bold">${formatCurrency(data.taxInfo.cgstAmount + data.taxInfo.sgstAmount)}</td>
+                </tr>
+                <tr>
+                    <td class="right bold">Total</td>
+                    <td class="right bold">${formatCurrency(data.taxInfo.taxableValue)}</td>
+                    <td></td>
+                    <td class="right bold">${formatCurrency(data.taxInfo.cgstAmount)}</td>
+                    <td></td>
+                    <td class="right bold">${formatCurrency(data.taxInfo.sgstAmount)}</td>
+                    <td class="right bold">${formatCurrency(data.taxInfo.cgstAmount + data.taxInfo.sgstAmount)}</td>
+                </tr>
+            </tbody>
+        </table>
 
-        <div class="footer">
-            <p>Thank you for choosing LushandPure!</p>
-            <p style="margin-top: 8px;"> +917017877512 | contact@lushandpures.com</p>
-            <p style="margin-top: 4px;"> Kasera, Mathura, Uttar Pradesh - 281202</p>
-            <p style="margin-top: 8px;">This is a computer-generated invoice.</p>
-        </div>
+        <!-- Footer / Declaration -->
+        <table style="border-top: none;">
+            <tr>
+                <td style="width: 50%;">
+                    <div class="small-text" style="text-decoration: underline;">Declaration</div>
+                    <div class="small-text">We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.</div>
+                </td>
+                <td style="width: 50%;">
+                    <div class="right small-text bold" style="margin-bottom: 30px;">for ${data.sellerName}</div>
+                    <div class="footer-sign">Authorised Signatory</div>
+                </td>
+            </tr>
+        </table>
+        
+        <div class="center small-text" style="margin-top: 20px;">This is a computer generated invoice.</div>
     </body>
     </html>
     `;
 };
 
+// --- Service ---
 export const invoiceService = {
-    generateAndShareInvoice: async (data: InvoiceData): Promise<void> => {
+    generateAndShareInvoice: async (invoiceData: any): Promise<void> => {
         try {
-            const html = generateInvoiceHTML(data);
+            // Transform Order Data to Formal Invoice Data
+            const items: InvoiceItem[] = invoiceData.items.map((item: any) => ({
+                name: item.name,
+                description: item.description, // Passed from createInvoiceFromOrder
+                quantity: item.quantity,
+                unit: item.unit || 'Nos',
+                rate: item.unitPrice,
+                amount: item.total,
+                discount: item.discountPercentage
+            }));
 
-            // Use RNPrint to print/save as PDF
-            await RNPrint.print({
-                html,
-                jobName: `LushandPure_Invoice_${data.orderNumber}`,
-            });
+            // Extract totals
+            // Use grandTotal passed from createInvoiceFromOrder (which comes from order.totalPrice)
+            const total = invoiceData.grandTotal;
+            const deliveryFee = invoiceData.deliveryFee || 0;
+
+            // Tax amounts from order
+            const sgstAmount = invoiceData.sgst || 0;
+            const cgstAmount = invoiceData.cgst || 0;
+            const taxAmount = sgstAmount + cgstAmount;
+
+            // Calculate Taxable Value
+            // Formula: TaxableValue + Tax + DeliveryFee = Total
+            // So: TaxableValue = Total - Tax - DeliveryFee
+            const taxableValue = total - taxAmount - deliveryFee;
+
+            // Calculate Rates based on amounts
+            const sgstRate = taxableValue > 0 ? (sgstAmount / taxableValue) * 100 : 0;
+            const cgstRate = taxableValue > 0 ? (cgstAmount / taxableValue) * 100 : 0;
+
+            const taxInfo: TaxInfo = {
+                taxableValue: taxableValue,
+                sgstRate: Number(sgstRate.toFixed(2)),
+                sgstAmount: sgstAmount,
+                cgstRate: Number(cgstRate.toFixed(2)),
+                cgstAmount: cgstAmount,
+            };
+
+            const data: InvoiceData = {
+                invoiceNo: invoiceData.invoiceNumber,
+                date: invoiceData.orderDate,
+                sellerName: "Lushpure Ruralfields Private Limited",
+                sellerAddress: "Kasera Raya Mant Road, MATHURA, Uttar Pradesh - 281202",
+                sellerGstin: "09AAFCL8465L1ZS",
+                sellerState: "Uttar Pradesh",
+                sellerStateCode: "09",
+                buyerName: invoiceData.customerName,
+                buyerAddress: invoiceData.deliveryAddress,
+                buyerState: "Uttar Pradesh",
+                buyerStateCode: "09",
+                items: items,
+                totalAmount: total,
+                totalAmountWords: numberToWords(total),
+                taxInfo: taxInfo,
+                isSubscription: false,
+                deliveryFee: deliveryFee,
+                paymentMethod: invoiceData.paymentMethod,
+                mrpTotal: invoiceData.mrpTotal,
+                productDiscount: invoiceData.productDiscount,
+                couponCode: invoiceData.couponCode,
+                couponDiscount: invoiceData.couponDiscount
+            };
+
+            const html = generateFormalInvoiceHTML(data);
+            await RNPrint.print({ html, jobName: `Invoice_${invoiceData.invoiceNumber}` });
 
         } catch (error: any) {
             logger.error('Invoice generation error:', error);
-            Alert.alert('Error', 'Failed to generate invoice. Please try again.');
+            Alert.alert('Error', 'Failed to generate invoice.');
         }
     },
 
-    // Helper to create invoice data from order
-    createInvoiceFromOrder: (order: any): InvoiceData => {
-        const items: InvoiceItem[] = order.items?.map((item: any) => ({
-            name: item.item || item.id?.name || 'Product',
-            quantity: item.count || 1,
-            unitPrice: item.id?.price || 0,
-            total: (item.id?.price || 0) * (item.count || 1)
-        })) || [];
+    createInvoiceFromOrder: (order: any) => {
+        // Reuse existing logic to shape the initial object
+        const items = order.items?.map((item: any) => {
+            const product = item.id || {}; // Populated product details
+            const unitPrice = product.price || 0;
+            const discountPrice = product.discountPrice || 0;
+            const quantity = item.count || 1;
 
-        const subtotal = items.reduce((sum, item) => sum + item.total, 0);
+            // Product Size info (Handling nested quantity object in DB)
+            // DB Schema: quantity: { value: 500, unit: 'ml' }
+            const qtyValue = product.quantity?.value || product.quantityValue || '';
+            const qtyUnit = product.quantity?.unit || product.quantityUnit || '';
+
+            const sizeDescription = (qtyValue && qtyUnit) ? `(${qtyValue} ${qtyUnit})` : '';
+
+            // Calculate discount % if applicable
+            let discountPercentage = 0;
+            let finalUnitPrice = unitPrice;
+
+            if (discountPrice > 0 && discountPrice < unitPrice) {
+                discountPercentage = Math.round(((unitPrice - discountPrice) / unitPrice) * 100);
+                finalUnitPrice = discountPrice;
+            }
+
+            return {
+                name: item.item || product.name || 'Product',
+                description: sizeDescription, // Add size to description
+                quantity: quantity,
+                unit: 'Nos', // Always use 'Nos' for count-based normal orders
+                unitPrice: unitPrice,
+                total: finalUnitPrice * quantity, // Use final discounted price for total amount
+                discountPercentage: discountPercentage
+            };
+        }) || [];
+
+        const subtotal = items.reduce((sum: number, item: any) => sum + item.total, 0);
         const deliveryFee = order.deliveryFee || 0;
-        const grandTotal = order.totalPrice || (subtotal + deliveryFee);
+        const grandTotal = order.totalPrice;
+
+        // Calculate MRP Total
+        let mrpTotal = 0;
+        order.items?.forEach((item: any) => {
+            const mrp = item.unitMrp || item.id?.price || 0;
+            const qty = item.count || 1;
+            mrpTotal += mrp * qty;
+        });
+
+        const productDiscount = mrpTotal - subtotal;
+
+        const sessionYear = calculateSessionYear(order.createdAt || new Date());
+        const orderIdSuffix = order.orderId || (order._id ? order._id.slice(-6).toUpperCase() : '000');
 
         return {
-            invoiceNumber: `INV-${order.orderId || order._id?.slice(-6).toUpperCase()}`,
-            orderNumber: order.orderId || order._id?.slice(-6).toUpperCase(),
+            invoiceNumber: `LP/${sessionYear}/${orderIdSuffix}`,
             orderDate: order.createdAt || new Date(),
             customerName: order.customer?.name || 'Customer',
-            customerPhone: order.customer?.phone,
             deliveryAddress: order.deliveryLocation?.address || 'Address not available',
-            branchName: order.branch?.name || order.pickupLocation?.address || 'Branch',
-            branchAddress: order.branch?.address,
             items,
             subtotal,
             deliveryFee,
             grandTotal,
-            paymentMethod: order.paymentDetails?.paymentMethod === 'cod' ? 'COD' : 'Online',
-            isPaid: order.paymentStatus === 'verified' || order.paymentStatus === 'completed'
+            sgst: order.sgst,
+            cgst: order.cgst,
+            paymentMethod: order.paymentDetails?.paymentMethod,
+            couponCode: order.couponCode,
+            couponDiscount: order.couponDiscount || 0,
+            productDiscount: productDiscount > 0 ? productDiscount : 0,
+            mrpTotal: mrpTotal
         };
     },
 
-    // Generate and share subscription invoice
     generateSubscriptionInvoice: async (subscription: any): Promise<void> => {
         try {
-            const formatDateShort = (date: Date | string): string => {
-                const d = new Date(date);
-                return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+            const products = subscription.products || [];
+
+            // Map Subscription Products
+            const items: InvoiceItem[] = products.map((p: any) => {
+                const totalDeliveries = p.totalDeliveries || subscription.totalDeliveries || 0;
+                const count = p.count || 1;
+                const quantityValue = p.quantityValue || 0;
+                const quantityUnit = p.quantityUnit || 'Unit';
+
+                const startMonth = new Date(subscription.startDate).toLocaleString('default', { month: 'short', year: 'numeric' });
+                const endMonth = new Date(subscription.endDate).toLocaleString('default', { month: 'short', year: 'numeric' });
+                const dateRange = startMonth === endMonth ? startMonth : `${startMonth} - ${endMonth}`;
+
+                const totalPrice = p.monthlyPrice || (p.unitPrice * totalDeliveries);
+
+                return {
+                    name: p.productName,
+                    description: `${dateRange}\n(${p.deliveryFrequency || 'Daily'})`,
+                    packetSize: `${quantityValue} ${quantityUnit}`,
+                    qtyPerDelivery: count,
+                    totalDeliveries: totalDeliveries,
+                    quantity: quantityValue, // Backward compatibility for interface, unused in sub display
+                    unit: quantityUnit,
+                    rate: p.unitPrice,
+                    amount: totalPrice,
+                    discount: 0,
+                    hsn: '0401'
+                };
+            });
+
+            const totalAmount = subscription.bill || items.reduce((s, i) => s + i.amount, 0);
+
+            // Tax Info from Subscription Object
+            const sgstAmount = subscription.sgst || 0;
+            const cgstAmount = subscription.cgst || 0;
+            const taxAmount = sgstAmount + cgstAmount;
+
+            // Taxable Value
+            const taxableValue = totalAmount - taxAmount;
+
+            // Calculate Rates
+            const sgstRate = taxableValue > 0 ? (sgstAmount / taxableValue) * 100 : 0;
+            const cgstRate = taxableValue > 0 ? (cgstAmount / taxableValue) * 100 : 0;
+
+            const taxInfo: TaxInfo = {
+                taxableValue: taxableValue,
+                sgstRate: Number(sgstRate.toFixed(2)),
+                sgstAmount: sgstAmount,
+                cgstRate: Number(cgstRate.toFixed(2)),
+                cgstAmount: cgstAmount
             };
 
-            const products = subscription.products || [];
-            const productsHTML = products.map((p: any, index: number) => `
-                <tr>
-                    <td style="padding: 12px; border-bottom: 1px solid #f0f0f0;">${index + 1}</td>
-                    <td style="padding: 12px; border-bottom: 1px solid #f0f0f0;">${p.productName || 'Product'}</td>
-                    <td style="padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: center;">${p.quantityValue || 1} ${p.quantityUnit || ''}</td>
-                    <td style="padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: center;">${p.deliveryFrequency || 'Daily'}</td>
-                    <td style="padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: center;">
-                        <span style="color: #22C55E; font-weight: 600;">${p.deliveredCount || 0}</span>
-                        <span style="color: #888;">/${p.totalDeliveries || 0}</span>
-                    </td>
-                    <td style="padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: right; font-weight: 600;">₹${p.monthlyPrice || 0}</td>
-                </tr>
-            `).join('');
+            const sessionYear = calculateSessionYear(subscription.startDate);
+            const subIdSuffix = subscription.subscriptionId || (subscription._id ? subscription._id.slice(-6).toUpperCase() : '000');
 
-            const deliveredCount = subscription.deliveredCount || 0;
-            const remainingDeliveries = subscription.remainingDeliveries || 0;
-            const totalDeliveries = subscription.totalDeliveries || (deliveredCount + remainingDeliveries);
-            const progressPercent = totalDeliveries > 0 ? Math.round((deliveredCount / totalDeliveries) * 100) : 0;
+            const data: InvoiceData = {
+                invoiceNo: `LP/${sessionYear}/${subIdSuffix}`,
+                date: subscription.startDate, // Invoice date usually start of sub
+                sellerName: "Lushpure Ruralfields Private Limited",
+                sellerAddress: "Kasera Raya Mant Road, MATHURA, Uttar Pradesh - 281202",
+                sellerGstin: "09AAFCL8465L1ZS",
+                sellerState: "Uttar Pradesh",
+                sellerStateCode: "09",
+                buyerName: subscription.customer?.name || "Customer",
+                buyerAddress: subscription.deliveryAddress?.addressLine1 ?
+                    `${subscription.deliveryAddress.addressLine1}, ${subscription.deliveryAddress.city}, ${subscription.deliveryAddress.state}` :
+                    "Address not available",
+                buyerState: "Uttar Pradesh",
+                buyerStateCode: "09",
+                items: items,
+                totalAmount: totalAmount,
+                totalAmountWords: numberToWords(totalAmount),
+                taxInfo: taxInfo,
+                isSubscription: true,
+                subscriptionPeriod: `${new Date(subscription.startDate).toLocaleDateString()} to ${new Date(subscription.endDate).toLocaleDateString()}`,
+                paymentMethod: subscription.paymentMethod || subscription.paymentDetails?.paymentMethod
+            };
 
-            // Calculate subscription total from products if bill is not available
-            const subscriptionTotal = subscription.bill || subscription.totalBill ||
-                products.reduce((sum: number, p: any) => sum + (p.monthlyPrice || 0), 0);
-
-            const customerName = subscription.customer?.name || 'Customer';
-            const customerPhone = subscription.customer?.phone || '';
-            const address = subscription.deliveryAddress
-                ? `${subscription.deliveryAddress.addressLine1 || ''}, ${subscription.deliveryAddress.city || ''} - ${subscription.deliveryAddress.zipCode || ''}`
-                : subscription.customer?.address || 'Address not available';
-
-            const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Subscription Invoice</title>
-                <style>
-                    * { margin: 0; padding: 0; box-sizing: border-box; }
-                    body { font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 30px; }
-                    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 3px solid #EF4444; }
-                    .brand-name { font-size: 28px; font-weight: 700; color: #EF4444; margin-bottom: 4px; }
-                    .brand-tagline { font-size: 12px; color: #666; }
-                    .brand-email { font-size: 12px; color: #888; margin-top: 8px; }
-                    .invoice-title { font-size: 24px; font-weight: 700; color: #333; margin-bottom: 8px; text-align: right; }
-                    .invoice-number { font-size: 14px; color: #666; text-align: right; }
-                    .status-badge { display: inline-block; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-                    .status-active { background: #DCFCE7; color: #166534; }
-                    .status-pending { background: #E0E7FF; color: #3730A3; }
-                    .info-section { display: flex; justify-content: space-between; margin-bottom: 20px; gap: 15px; }
-                    .info-box { flex: 1; background: #f9f9f9; padding: 15px; border-radius: 8px; }
-                    .info-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-                    .info-value { font-size: 14px; font-weight: 600; color: #333; }
-                    .info-address { font-size: 12px; color: #666; margin-top: 4px; }
-                    .progress-section { background: #f9f9f9; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-                    .progress-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
-                    .progress-stats { display: flex; justify-content: space-around; text-align: center; margin-bottom: 15px; }
-                    .progress-stat { }
-                    .progress-stat-value { font-size: 24px; font-weight: 700; }
-                    .progress-stat-label { font-size: 11px; color: #888; }
-                    .progress-bar-bg { width: 100%; height: 8px; background: #E5E7EB; border-radius: 4px; overflow: hidden; }
-                    .progress-bar-fill { height: 100%; background: #EF4444; border-radius: 4px; }
-                    .items-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                    .items-table th { background: #EF4444; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; }
-                    .items-table th:nth-child(3), .items-table th:nth-child(4) { text-align: center; }
-                    .items-table th:last-child { text-align: right; }
-                    .summary-section { margin-left: auto; width: 250px; }
-                    .summary-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
-                    .grand-total { display: flex; justify-content: space-between; padding: 14px; background: #EF4444; color: white; border-radius: 8px; margin-top: 10px; }
-                    .payment-status { text-align: center; margin-top: 20px; padding: 14px; border-radius: 8px; font-weight: 600; font-size: 14px; }
-                    .payment-paid { background: #D1FAE5; color: #065F46; }
-                    .payment-cod { background: #FEF3C7; color: #92400E; }
-                    .footer { margin-top: 25px; padding-top: 15px; border-top: 1px solid #eee; text-align: center; color: #888; font-size: 11px; }
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <div>
-                        <div class="brand-name">LushandPure</div>
-                        <div class="brand-tagline">Fresh & Pure Dairy Delivered</div>
-                        <div class="brand-email">contact@lushandpures.com</div>
-                    </div>
-                    <div>
-                        <div class="invoice-title">SUBSCRIPTION</div>
-                        <div class="invoice-number">#${subscription.subscriptionId || subscription._id?.slice(-8).toUpperCase()}</div>
-                        <div class="status-badge ${subscription.status === 'active' ? 'status-active' : 'status-pending'}" style="margin-top: 8px;">
-                            ${(subscription.status || 'active').toUpperCase()}
-                        </div>
-                    </div>
-                </div>
-
-                <div class="info-section">
-                    <div class="info-box">
-                        <div class="info-label">Customer</div>
-                        <div class="info-value">${customerName}</div>
-                        ${customerPhone ? `<div class="info-address">📞 ${customerPhone}</div>` : ''}
-                        <div class="info-address">📍 ${address}</div>
-                    </div>
-                    <div class="info-box">
-                        <div class="info-label">Duration</div>
-                        <div class="info-value">${formatDateShort(subscription.startDate)} - ${formatDateShort(subscription.endDate)}</div>
-                        <div class="info-address">Slot: ${subscription.slot === 'morning' ? '🌅 Morning' : '🌆 Evening'}</div>
-                    </div>
-                </div>
-
-                <div class="progress-section">
-                    <div class="progress-title">Delivery Progress</div>
-                    <div class="progress-stats">
-                        <div class="progress-stat">
-                            <div class="progress-stat-value" style="color: #22C55E;">${deliveredCount}</div>
-                            <div class="progress-stat-label">Delivered</div>
-                        </div>
-                        <div class="progress-stat">
-                            <div class="progress-stat-value" style="color: #F59E0B;">${remainingDeliveries}</div>
-                            <div class="progress-stat-label">Remaining</div>
-                        </div>
-                        <div class="progress-stat">
-                            <div class="progress-stat-value">${totalDeliveries}</div>
-                            <div class="progress-stat-label">Total</div>
-                        </div>
-                    </div>
-                    <div class="progress-bar-bg">
-                        <div class="progress-bar-fill" style="width: ${progressPercent}%;"></div>
-                    </div>
-                    <div style="text-align: center; margin-top: 8px; font-size: 12px; color: #888;">${progressPercent}% Complete</div>
-                </div>
-
-                <table class="items-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 35px;">#</th>
-                            <th>Product</th>
-                            <th style="width: 70px;">Qty</th>
-                            <th style="width: 80px;">Frequency</th>
-                            <th style="width: 80px;">Delivered</th>
-                            <th style="width: 80px;">Price</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${productsHTML}
-                    </tbody>
-                </table>
-
-                <div class="summary-section">
-                    <div class="summary-row">
-                        <span style="color: #666;">Subscription Total</span>
-                        <span style="font-weight: 500;">₹${subscriptionTotal}</span>
-                    </div>
-                    <div class="summary-row">
-                        <span style="color: #666;">Delivery</span>
-                        <span style="font-weight: 500; color: #22C55E;">FREE</span>
-                    </div>
-                    <div class="grand-total">
-                        <span style="font-size: 14px; font-weight: 600;">Total Amount</span>
-                        <span style="font-size: 18px; font-weight: 700;">₹${subscriptionTotal}</span>
-                    </div>
-                </div>
-
-                <div class="payment-status ${subscription.paymentMethod !== 'cod' ? 'payment-paid' : 'payment-cod'}">
-                    ${subscription.paymentMethod !== 'cod' ? '✓ PAID VIA ONLINE PAYMENT' : '💵 CASH ON DELIVERY'}
-                </div>
-
-                <div class="footer">
-                    <p>Thank you for choosing LushandPure!</p>
-                    <p style="margin-top: 8px;">📞 +917017877512 | 📧 contact@lushandpures.com</p>
-                    <p style="margin-top: 4px;">📍 Kasera, Mathura, Uttar Pradesh - 281202</p>
-                    <p style="margin-top: 8px;">This is a computer-generated invoice.</p>
-                </div>
-            </body>
-            </html>
-            `;
-
-            await RNPrint.print({
-                html,
-                jobName: `LushandPure_Subscription_${subscription.subscriptionId || 'Invoice'}`,
-            });
+            const html = generateFormalInvoiceHTML(data);
+            await RNPrint.print({ html, jobName: `Subscription_${data.invoiceNo}` });
 
         } catch (error: any) {
             logger.error('Subscription invoice error:', error);
-            Alert.alert('Error', 'Failed to generate subscription invoice. Please try again.');
+            Alert.alert('Error', 'Failed to generate subscription invoice.');
         }
     }
 };

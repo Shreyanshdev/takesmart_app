@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../shared/MonoText';
 import { PartnerOrder } from '../../types/partner';
+import { BlurView } from '@react-native-community/blur';
 
 interface ActiveOrderCardProps {
     order: PartnerOrder;
@@ -24,7 +25,9 @@ export const ActiveOrderCard: React.FC<ActiveOrderCardProps> = ({
     const customerName = order.customer?.name || 'Customer';
     const customerPhone = order.customer?.phone || '';
     const deliveryAddress = order.deliveryLocation.address;
-    const itemCount = order.items.reduce((sum, item) => sum + item.count, 0);
+    // Use itemCount from API, only fallback to calculating from items if not available
+    const itemCount = order.itemCount ?? (order.items?.reduce((sum, item) => sum + (item.quantity || item.count || 0), 0) || 0);
+
 
     // Status config
     const getStatusConfig = () => {
@@ -80,131 +83,178 @@ export const ActiveOrderCard: React.FC<ActiveOrderCardProps> = ({
 
     return (
         <View style={styles.container}>
-            {/* Status Badge */}
-            <View style={[styles.statusBadge, { backgroundColor: statusConfig.bgColor }]}>
-                <View style={[styles.statusDot, { backgroundColor: statusConfig.color }]} />
-                <MonoText size="xs" weight="bold" color={statusConfig.color}>
-                    {statusConfig.label.toUpperCase()}
-                </MonoText>
-            </View>
+            <BlurView
+                blurType="light"
+                blurAmount={10}
+                reducedTransparencyFallbackColor="white"
+                style={StyleSheet.absoluteFill}
+            />
 
-            {/* Order Header */}
-            <TouchableOpacity style={styles.headerRow} onPress={() => onViewDetails(order)} activeOpacity={0.7}>
-                <View style={styles.orderInfo}>
-                    <MonoText size="m" weight="bold">#{order.orderId}</MonoText>
-                    <MonoText size="xs" color={colors.textLight}>
-                        {itemCount} {itemCount === 1 ? 'item' : 'items'} • ₹{order.totalPrice}
-                    </MonoText>
-                </View>
-                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                    <Path d="M9 18l6-6-6-6" />
-                </Svg>
-            </TouchableOpacity>
+            <View style={styles.cardContent}>
+                {/* Header: ID + Status */}
+                <View style={styles.headerRow}>
+                    <View style={styles.orderIdBadge}>
+                        <View style={styles.idLabel}>
+                            <MonoText size="xxs" weight="bold" color={colors.textLight}>ORDER ID</MonoText>
+                        </View>
+                        <View style={styles.idValue}>
+                            <MonoText size="xs" weight="bold" color={colors.black}>#{order.orderId?.slice(-6).toUpperCase()}</MonoText>
+                        </View>
+                    </View>
 
-            {/* Customer Info */}
-            <View style={styles.customerRow}>
-                <View style={styles.customerIcon}>
-                    <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
-                        <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                        <Circle cx="12" cy="7" r="4" />
-                    </Svg>
+                    <View style={[styles.statusBadge, { backgroundColor: statusConfig.bgColor }]}>
+                        <View style={[styles.statusDot, { backgroundColor: statusConfig.color }]} />
+                        <MonoText size="xxs" weight="bold" color={statusConfig.color}>
+                            {statusConfig.label.toUpperCase()}
+                        </MonoText>
+                    </View>
                 </View>
-                <View style={styles.customerInfo}>
-                    <MonoText size="s" weight="semiBold">{customerName}</MonoText>
-                    {customerPhone && (
-                        <MonoText size="xs" color={colors.textLight}>{customerPhone}</MonoText>
-                    )}
-                </View>
-            </View>
 
-            {/* Delivery Address */}
-            <View style={styles.addressRow}>
-                <View style={styles.locationIcon}>
-                    <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2">
-                        <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                        <Circle cx="12" cy="10" r="3" />
-                    </Svg>
-                </View>
-                <MonoText size="xs" color={colors.text} numberOfLines={2} style={styles.addressText}>
-                    {deliveryAddress}
-                </MonoText>
-            </View>
-
-            {/* Action Button */}
-            {statusConfig.action && (
+                {/* Main Info Box */}
                 <TouchableOpacity
-                    style={[styles.actionButton, { backgroundColor: statusConfig.actionColor }]}
-                    onPress={handleAction}
-                    disabled={isLoading}
-                    activeOpacity={0.8}
+                    style={styles.mainInfoBox}
+                    onPress={() => onViewDetails(order)}
+                    activeOpacity={0.7}
                 >
-                    {isLoading ? (
-                        <ActivityIndicator color={colors.white} size="small" />
-                    ) : (
-                        <>
-                            {statusConfig.icon === 'pickup' && (
-                                <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
-                                    <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
-                                    <Line x1="3" y1="6" x2="21" y2="6" />
-                                    <Path d="M16 10a4 4 0 0 1-8 0" />
-                                </Svg>
-                            )}
-                            {statusConfig.icon === 'delivered' && (
-                                <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2">
-                                    <Path d="M20 6L9 17l-5-5" />
-                                </Svg>
-                            )}
-                            <MonoText
-                                size="s"
-                                weight="bold"
-                                color={statusConfig.icon === 'pickup' ? colors.black : colors.white}
-                                style={{ marginLeft: spacing.xs }}
-                            >
-                                {statusConfig.action}
+                    <View style={styles.customerSection}>
+                        <View style={styles.customerAvatar}>
+                            <MonoText size="s" weight="bold" color={colors.white}>
+                                {customerName.charAt(0).toUpperCase()}
                             </MonoText>
-                        </>
-                    )}
-                </TouchableOpacity>
-            )}
+                        </View>
+                        <View style={styles.customerDetails}>
+                            <MonoText size="m" weight="bold">{customerName}</MonoText>
+                            <MonoText size="xs" color={colors.textLight}>
+                                {itemCount} {itemCount === 1 ? 'item' : 'items'} • ₹{order.totalPrice}
+                            </MonoText>
+                        </View>
+                        <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.border} strokeWidth="2">
+                            <Path d="M9 18l6-6-6-6" />
+                        </Svg>
+                    </View>
 
-            {/* Waiting state */}
-            {order.status === 'awaitconfirmation' && (
-                <View style={styles.waitingState}>
-                    <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.warning} strokeWidth="2">
-                        <Circle cx="12" cy="12" r="10" />
-                        <Path d="M12 6v6l4 2" />
-                    </Svg>
-                    <MonoText size="xs" color={colors.warning} style={{ marginLeft: spacing.xs }}>
-                        Waiting for customer to confirm receipt
-                    </MonoText>
-                </View>
-            )}
+                    <View style={styles.divider} />
+
+                    <View style={styles.addressSection}>
+                        <View style={styles.iconCircle}>
+                            <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2.5">
+                                <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                <Circle cx="12" cy="10" r="3" />
+                            </Svg>
+                        </View>
+                        <MonoText size="xs" color={colors.text} numberOfLines={1} style={styles.addressText}>
+                            {deliveryAddress}
+                        </MonoText>
+                    </View>
+                </TouchableOpacity>
+
+                {/* Footer Action */}
+                {statusConfig.action ? (
+                    <TouchableOpacity
+                        style={[styles.actionButton, { backgroundColor: statusConfig.actionColor }]}
+                        onPress={handleAction}
+                        disabled={isLoading}
+                        activeOpacity={0.8}
+                    >
+                        {isLoading ? (
+                            <ActivityIndicator color={statusConfig.icon === 'pickup' ? colors.black : colors.white} size="small" />
+                        ) : (
+                            <View style={styles.actionBtnContent}>
+                                {statusConfig.icon === 'pickup' ? (
+                                    <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2.5">
+                                        <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                                        <Path d="M3 6h18" />
+                                        <Path d="M16 10a4 4 0 0 1-8 0" />
+                                    </Svg>
+                                ) : (
+                                    <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2.5">
+                                        <Path d="M20 6L9 17l-5-5" />
+                                    </Svg>
+                                )}
+                                <MonoText
+                                    size="s"
+                                    weight="bold"
+                                    color={statusConfig.icon === 'pickup' ? colors.black : colors.white}
+                                    style={{ marginLeft: 8 }}
+                                >
+                                    {statusConfig.action}
+                                </MonoText>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+                ) : order.status === 'awaitconfirmation' ? (
+                    <View style={styles.waitingBanner}>
+                        <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.warning} strokeWidth="2">
+                            <Circle cx="12" cy="12" r="10" />
+                            <Path d="M12 6v6l4 2" />
+                        </Svg>
+                        <MonoText size="xs" weight="bold" color={colors.warning} style={{ marginLeft: 8 }}>
+                            Waiting for customer confirmation
+                        </MonoText>
+                    </View>
+                ) : null}
+            </View>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
-        backgroundColor: colors.white,
-        borderRadius: 16,
-        padding: spacing.m,
+        borderRadius: 24,
         marginBottom: spacing.m,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-        elevation: 3,
+        overflow: 'hidden',
         borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.05)',
+        backgroundColor: 'rgba(255, 255, 255, 0.7)',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.05,
+                shadowRadius: 12,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
+    },
+    cardContent: {
+        padding: spacing.m,
+    },
+    headerRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: spacing.m,
+    },
+    orderIdBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.white,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderStyle: 'dashed',
         borderColor: colors.border,
+        overflow: 'hidden',
+    },
+    idLabel: {
+        backgroundColor: '#F1F5F9',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRightWidth: 1,
+        borderRightColor: colors.border,
+        borderStyle: 'dashed',
+    },
+    idValue: {
+        paddingHorizontal: 10,
+        paddingVertical: 4,
     },
     statusBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        alignSelf: 'flex-start',
-        paddingHorizontal: spacing.s,
-        paddingVertical: 4,
-        borderRadius: 8,
-        marginBottom: spacing.s,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 10,
         gap: 6,
     },
     statusDot: {
@@ -212,61 +262,74 @@ const styles = StyleSheet.create({
         height: 6,
         borderRadius: 3,
     },
-    headerRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: spacing.s,
-    },
-    orderInfo: {
-        flex: 1,
-    },
-    customerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: spacing.s,
-    },
-    customerIcon: {
-        width: 32,
-        height: 32,
+    mainInfoBox: {
+        backgroundColor: 'rgba(255, 255, 255, 0.5)',
         borderRadius: 16,
-        backgroundColor: `${colors.primary}15`,
+        padding: 12,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.02)',
+    },
+    customerSection: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    customerAvatar: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: colors.primary,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: spacing.s,
     },
-    customerInfo: {
+    customerDetails: {
         flex: 1,
+        marginLeft: 12,
     },
-    addressRow: {
+    divider: {
+        height: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.05)',
+        marginVertical: 12,
+    },
+    addressSection: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
-        backgroundColor: '#F8F9FA',
-        padding: spacing.s,
-        borderRadius: 10,
-        marginBottom: spacing.m,
+        alignItems: 'center',
     },
-    locationIcon: {
-        marginRight: spacing.xs,
-        marginTop: 2,
+    iconCircle: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: `${colors.accent}15`,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     addressText: {
         flex: 1,
-        lineHeight: 18,
+        marginLeft: 10,
     },
     actionButton: {
+        borderRadius: 14,
+        paddingVertical: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    actionBtnContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    waitingBanner: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        backgroundColor: 'rgba(251, 191, 36, 0.1)',
         paddingVertical: 12,
         borderRadius: 12,
-    },
-    waitingState: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: `${colors.warning}15`,
-        paddingVertical: spacing.s,
-        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: 'rgba(251, 191, 36, 0.2)',
     },
 });

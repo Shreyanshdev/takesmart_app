@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Svg, { Path, Line } from 'react-native-svg';
+import { BlurView } from '@react-native-community/blur';
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';
 import { MonoText } from '../../../components/shared/MonoText';
 import { feedbackService } from '../../../services/customer/feedback.service';
 
+const HEADER_CONTENT_HEIGHT = 56;
 const TOPICS = ['General', 'Product Quality', 'App Experience', 'Delivery', 'Other'];
 
 export const FeedbackScreen = () => {
     const navigation = useNavigation();
+    const insets = useSafeAreaInsets();
     const [message, setMessage] = useState('');
     const [selectedTopic, setSelectedTopic] = useState('General');
     const [submitting, setSubmitting] = useState(false);
@@ -36,16 +39,24 @@ export const FeedbackScreen = () => {
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <View style={styles.container}>
             {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <Path d="M19 12H5M12 19l-7-7 7-7" />
-                    </Svg>
-                </TouchableOpacity>
-                <MonoText size="l" weight="bold">Share Feedback</MonoText>
-                <View style={{ width: 40 }} />
+            <View style={[styles.header, { paddingTop: insets.top }]}>
+                <BlurView
+                    style={StyleSheet.absoluteFill}
+                    blurType="light"
+                    blurAmount={20}
+                    reducedTransparencyFallbackColor="white"
+                />
+                <View style={styles.headerContent}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <Path d="M19 12H5M12 19l-7-7 7-7" />
+                        </Svg>
+                    </TouchableOpacity>
+                    <MonoText size="l" weight="bold" style={styles.headerTitle}>Share Feedback</MonoText>
+                    <View style={{ width: 40 }} />
+                </View>
             </View>
 
             <KeyboardAvoidingView
@@ -117,7 +128,7 @@ export const FeedbackScreen = () => {
 
                 </ScrollView>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </View>
     );
 };
 
@@ -127,18 +138,37 @@ const styles = StyleSheet.create({
         backgroundColor: colors.background,
     },
     header: {
+        backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        overflow: 'hidden',
+    },
+    headerContent: {
+        height: HEADER_CONTENT_HEIGHT,
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: spacing.m,
-        paddingVertical: spacing.m,
-        borderBottomWidth: 1,
-        borderBottomColor: '#F3F4F6',
+        paddingHorizontal: 16,
+    },
+    headerTitle: {
+        flex: 1,
+        marginLeft: 12,
     },
     backBtn: {
-        padding: 8,
+        width: 40,
+        height: 40,
         borderRadius: 20,
-        backgroundColor: '#F3F4F6',
+        backgroundColor: colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
     },
     content: {
         padding: spacing.l,

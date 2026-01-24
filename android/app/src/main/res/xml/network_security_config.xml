@@ -16,6 +16,6 @@
     
     <!-- Production backend - HTTPS only -->
     <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">lushandpurebackend.onrender.com</domain>
+        <domain includeSubdomains="true">takesmartbackend.onrender.com</domain>
     </domain-config>
 </network-security-config>

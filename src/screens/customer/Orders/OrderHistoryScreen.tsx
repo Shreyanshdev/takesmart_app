@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, Platform, FlatList } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, FlatList, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Svg, { Path, Circle, Polyline } from 'react-native-svg';
 import { colors } from '../../../theme/colors';
@@ -10,9 +10,14 @@ import { api } from '../../../services/core/api';
 import { useAuthStore } from '../../../store/authStore';
 import LinearGradient from 'react-native-linear-gradient';
 import { logger } from '../../../utils/logger';
+import { BlurView } from '@react-native-community/blur';
+import { SkeletonItem } from '../../../components/shared/SkeletonLoader';
+
+const HEADER_CONTENT_HEIGHT = 56;
 
 export const OrderHistoryScreen = () => {
     const navigation = useNavigation<any>();
+    const insets = useSafeAreaInsets();
     const { user } = useAuthStore();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -44,7 +49,7 @@ export const OrderHistoryScreen = () => {
     };
 
     const navigateToTracking = (orderId: string) => {
-        navigation.navigate('OrderTracking', { orderId });
+        navigation.navigate('OrderTracking', { orderId, from: 'history' });
     };
 
     const isActiveStatus = (status: string) =>
@@ -168,9 +173,35 @@ export const OrderHistoryScreen = () => {
 
     if (loading) {
         return (
-            <SafeAreaView style={[styles.container, styles.center]}>
-                <ActivityIndicator size="large" color={colors.primary} />
-            </SafeAreaView>
+            <View style={styles.container}>
+                <View style={[styles.header, { paddingTop: insets.top }]}>
+                    <View style={styles.headerContent}>
+                        <View style={styles.backBtn}>
+                            <SkeletonItem width={24} height={24} borderRadius={12} />
+                        </View>
+                        <SkeletonItem width={120} height={24} borderRadius={4} style={{ marginLeft: 12 }} />
+                    </View>
+                </View>
+                <View style={styles.listContent}>
+                    {[1, 2, 3, 4].map((i) => (
+                        <View key={i} style={styles.skeletonOrderCard}>
+                            <SkeletonItem width={4} height="100%" borderRadius={0} style={{ position: 'absolute', left: 0 }} />
+                            <View style={{ flex: 1, padding: 16 }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+                                    <SkeletonItem width="50%" height={20} borderRadius={4} />
+                                    <SkeletonItem width="20%" height={20} borderRadius={4} />
+                                </View>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+                                    <SkeletonItem width="40%" height={14} borderRadius={4} />
+                                    <SkeletonItem width="15%" height={14} borderRadius={4} />
+                                </View>
+                                <View style={{ height: 1, backgroundColor: '#F5F5F5', marginBottom: 14 }} />
+                                <SkeletonItem width={100} height={30} borderRadius={15} />
+                            </View>
+                        </View>
+                    ))}
+                </View>
+            </View>
         );
     }
 
@@ -179,19 +210,22 @@ export const OrderHistoryScreen = () => {
     return (
         <View style={styles.container}>
             {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2.5">
-                        <Path d="M19 12H5M12 19l-7-7 7-7" />
-                    </Svg>
-                </TouchableOpacity>
-                <View>
-                    <MonoText size="l" weight="bold">My Orders</MonoText>
-                    {activeCount > 0 && (
-                        <MonoText size="xs" color={colors.primary}>{activeCount} active</MonoText>
-                    )}
+            <View style={[styles.header, { paddingTop: insets.top }]}>
+                <BlurView
+                    style={StyleSheet.absoluteFill}
+                    blurType="light"
+                    blurAmount={20}
+                    reducedTransparencyFallbackColor="white"
+                />
+                <View style={styles.headerContent}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
+                            <Path d="M19 12H5M12 19l-7-7 7-7" />
+                        </Svg>
+                    </TouchableOpacity>
+                    <MonoText size="l" weight="bold" style={styles.headerTitle}>My Orders</MonoText>
+                    <View style={{ width: 40 }} />
                 </View>
-                <View style={{ width: 44 }} />
             </View>
 
             {/* Orders List */}
@@ -247,23 +281,38 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     header: {
+        position: 'relative',
+        backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        overflow: 'hidden',
+    },
+    headerContent: {
+        height: HEADER_CONTENT_HEIGHT,
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingTop: Platform.OS === 'android' ? 44 : 56,
-        paddingBottom: 16,
-        backgroundColor: '#FFFFFF',
-        borderBottomWidth: 1,
-        borderBottomColor: '#F3F4F6',
+        paddingHorizontal: 16,
+    },
+    headerTitle: {
+        flex: 1,
+        marginLeft: 12,
     },
     backBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: '#F8F9FA',
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: colors.white,
         alignItems: 'center',
         justifyContent: 'center',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
     },
     listWrapper: {
         flex: 1,
@@ -280,11 +329,27 @@ const styles = StyleSheet.create({
         marginBottom: 14,
         overflow: 'hidden',
         // Soft shadow
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-        elevation: 2,
+        // Soft shadow
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.04,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 2,
+            },
+        }),
+    },
+    skeletonOrderCard: {
+        flexDirection: 'row',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        marginBottom: 14,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: '#F0F0F0',
     },
     accentBar: {
         width: 4,

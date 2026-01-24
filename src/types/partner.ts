@@ -17,6 +17,11 @@ export interface PartnerOrder {
         latitude: number;
         longitude: number;
         address: string;
+        addressLine1?: string;
+        addressLine2?: string;
+        receiverName?: string;
+        receiverPhone?: string;
+        directions?: string;
     };
     pickupLocation: {
         latitude: number;
@@ -29,15 +34,35 @@ export interface PartnerOrder {
         address: string;
         timestamp?: Date;
     };
-    items: Array<{
+    items?: Array<{
         id: string | { _id: string; name: string; price: number; image?: string };
         item: string;
+        productName?: string;
+        productImage?: string;
+        packSize?: string;
+        handling?: {
+            fragile: boolean;
+            cold: boolean;
+            heavy: boolean;
+        };
+        deliveryInstructions?: string[];
         count: number;
+        quantity?: number;
     }>;
+    itemCount?: number;
+    paymentStatus?: 'pending' | 'verified' | 'failed' | 'refunded' | 'completed';
+    paymentDetails?: {
+        paymentMethod: 'online' | 'cod';
+        method?: string;
+        amount?: number;
+        verifiedAt?: string;
+    };
     status: 'pending' | 'accepted' | 'in-progress' | 'awaitconfirmation' | 'delivered' | 'cancelled';
     deliveryStatus: 'Assigning Partner' | 'Partner Assigned' | 'On The Way' | 'Delivered' | 'Cancelled';
-    totalPrice: number;
+    totalPrice?: number;
     deliveryFee: number;
+    sgst?: number;
+    cgst?: number;
     createdAt: string;
     updatedAt: string;
     routeData?: {
@@ -47,77 +72,7 @@ export interface PartnerOrder {
     };
 }
 
-export interface SubscriptionDelivery {
-    _id: string;
-    subscriptionId: string;
-    date: string;
-    slot: 'morning' | 'evening';
-    status: 'scheduled' | 'reaching' | 'awaitingCustomer' | 'delivered' | 'paused' | 'canceled' | 'noResponse' | 'concession';
-    startedAt?: string;
-    deliveredAt?: string;
-    confirmedAt?: string;
-    cutoffTime?: string;
-    products: Array<{
-        subscriptionProductId: string;
-        productId: string;
-        productName: string;
-        quantityValue: number;
-        quantityUnit: string;
-        unitPrice: number;
-        animalType: string;
-        deliveryStatus?: 'pending' | 'delivered' | 'failed';
-    }>;
-    customer: {
-        _id: string;
-        name: string;
-        phone: string;
-    };
-    address: {
-        addressLine1?: string;
-        addressLine2?: string;
-        city?: string;
-        state?: string;
-        zipCode?: string;
-        latitude?: number;
-        longitude?: number;
-    };
-    liveLocation?: {
-        latitude: number;
-        longitude: number;
-        address?: string;
-        lastUpdated?: string;
-    };
-}
 
-export interface PartnerSubscription {
-    _id: string;
-    subscriptionId: string;
-    customer: {
-        name: string;
-        phone: string;
-        address: string;
-    };
-    products: Array<{
-        productName: string;
-        quantityValue?: number;
-        quantityUnit?: string;
-        animalType: string;
-        unitPrice: number;
-        monthlyPrice: number;
-        deliveryFrequency: string;
-        totalDeliveries: number;
-        deliveredCount: number;
-        remainingDeliveries: number;
-    }>;
-    slot: 'morning' | 'evening';
-    startDate: string;
-    endDate: string;
-    status: 'active' | 'pending' | 'paused' | 'cancelled' | 'expired' | 'completed' | 'expiring';
-    todayDeliveryStatus: string;
-    totalDeliveries: number;
-    deliveredCount: number;
-    remainingDeliveries: number;
-}
 
 export interface DeliveryLocation {
     latitude: number;

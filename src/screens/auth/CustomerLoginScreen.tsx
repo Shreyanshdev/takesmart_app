@@ -1,50 +1,39 @@
 import React, { useState, useRef } from 'react';
-import { View, StyleSheet, Image, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, StyleSheet, Image, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Alert, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { BlurView } from '@react-native-community/blur';
+import LinearGradient from 'react-native-linear-gradient';
+import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../../components/shared/MonoText';
-import { PillButton } from '../../components/shared/PillButton';
 import { OtpBottomSheet } from '../../components/auth/OtpBottomSheet';
 import { authService } from '../../services/auth/auth.service';
 import { logger } from '../../utils/logger';
 
+const { width, height } = Dimensions.get('window');
+
 export const CustomerLoginScreen = () => {
     const navigation = useNavigation<any>();
-    const [phoneNumber, setPhoneNumber] = useState(new Array(10).fill(''));
+    const [phoneNumber, setPhoneNumber] = useState('');
     const [otpVisible, setOtpVisible] = useState(false);
     const [loading, setLoading] = useState(false);
     const [verificationId, setVerificationId] = useState<string | null>(null);
-    const inputs = useRef<Array<TextInput | null>>([]);
+    const inputRef = useRef<TextInput | null>(null);
 
-    const handlePhoneChange = (text: string, index: number) => {
-        const newPhone = [...phoneNumber];
-        newPhone[index] = text;
-        setPhoneNumber(newPhone);
-
-        if (text && index < 9) {
-            inputs.current[index + 1]?.focus();
-        }
+    const handlePhoneChange = (text: string) => {
+        // Only allow digits and max 10 characters
+        const cleaned = text.replace(/[^0-9]/g, '').slice(0, 10);
+        setPhoneNumber(cleaned);
     };
 
-    const handleBackspace = (key: string, index: number) => {
-        if (key === 'Backspace') {
-            // If current box is empty, move to previous
-            if (!phoneNumber[index] && index > 0) {
-                inputs.current[index - 1]?.focus();
-            }
-            // Optional enhancement: If user wants to clear previous digit immediately when backspacing on empty box
-            // We can leave it as just moving focus for safety
-        }
-    }
-
-    const isPhoneValid = phoneNumber.every(d => d !== '');
+    const isPhoneValid = phoneNumber.length === 10;
 
     const handleSendOtp = async () => {
-        setLoading(true); // This loading affects the main screen button
+        setLoading(true);
         try {
-            const response = await authService.sendOtp(phoneNumber.join(''));
+            const response = await authService.sendOtp(phoneNumber);
             if (response && response.verificationId) {
                 setVerificationId(response.verificationId);
                 setLoading(false);
@@ -55,7 +44,6 @@ export const CustomerLoginScreen = () => {
         } catch (error) {
             setLoading(false);
             logger.error('Send OTP error:', error);
-            // Re-throw so OtpBottomSheet knows it failed if called via Resend
             throw error;
         }
     };
@@ -67,228 +55,321 @@ export const CustomerLoginScreen = () => {
         }
 
         try {
-            await authService.verifyOtp(phoneNumber.join(''), otp, verificationId);
+            await authService.verifyOtp(phoneNumber, otp, verificationId);
             setOtpVisible(false);
 
-            // Login successful code...
             const { useAuthStore } = require('../../store/authStore');
             const { userService } = require('../../services/customer/user.service');
-            const userProfile = await userService.getProfile().catch(() => ({ _id: 'temp', phone: phoneNumber.join('') }));
+            const userProfile = await userService.getProfile().catch(() => ({ _id: 'temp', phone: phoneNumber }));
 
             const { storage } = require('../../services/core/storage');
             await storage.setUser(userProfile);
 
             useAuthStore.getState().login(userProfile);
+
+            if (!userProfile.name) {
+                navigation.replace('CompleteProfile');
+            } else {
+                const { useBranchStore } = require('../../store/branch.store');
+                useBranchStore.getState().setShouldShowAddressModal(true);
+                navigation.replace('MainTabs', { screen: 'Home' });
+            }
         } catch (error) {
             logger.error('Verify OTP error:', error);
-            // Throw error to trigger Shake/Clear in BottomSheet
             throw error;
         }
     };
 
     return (
-        <SafeAreaView style={styles.container}>
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.keyboardView}
-            >
-                <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                    {/* Customer Badge */}
-                    <View style={styles.customerBadge}>
-                        <MonoText size="xs" weight="bold" color={colors.primary}>
-                            CUSTOMER
-                        </MonoText>
-                    </View>
+        <View style={styles.container}>
+            {/* Gradient Background */}
+            <LinearGradient
+                colors={['#FFF8F0', '#FFFDD0', '#FFF5E6']}
+                style={styles.gradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+            />
 
-                    <View style={styles.logoContainer}>
-                        <Image
-                            source={require('../../assets/images/lpp.png')}
-                            style={styles.logo}
-                            resizeMode="contain"
-                        />
-                        <MonoText size="l" weight="bold" style={styles.tagline}>
-                            Pure Dairy, Pure Life
-                        </MonoText>
-                    </View>
+            {/* Decorative Blur Circles */}
+            <View style={[styles.blurCircle, styles.blurCircle1]} />
+            <View style={[styles.blurCircle, styles.blurCircle2]} />
 
-                    {/* Welcome Text */}
-                    <View style={styles.welcomeSection}>
-                        <MonoText size="xl" weight="bold" color={colors.text}>
-                            Welcome!
-                        </MonoText>
-                        <MonoText size="s" color={colors.textLight} style={{ marginTop: 4 }}>
-                            Order fresh dairy products delivered to your doorstep
-                        </MonoText>
-                    </View>
 
-                    <View style={styles.inputSection}>
-                        <View style={styles.phoneLabelRow}>
-                            <View style={styles.countryCode}>
-                                <MonoText size="m" weight="bold" color={colors.white}>+91</MonoText>
+            <SafeAreaView style={styles.safeArea}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.keyboardView}
+                >
+                    <ScrollView
+                        contentContainerStyle={styles.scrollContent}
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                    >
+                        <View style={styles.contentContainer}>
+                            {/* Customer Badge */}
+                            <View style={styles.customerBadge}>
+                                <MonoText size="xs" weight="bold" color={colors.primary}>
+                                    LOG IN
+                                </MonoText>
                             </View>
-                            <MonoText size="s" color={colors.textLight} style={styles.enterText}>Enter Mobile Number</MonoText>
-                        </View>
 
-                        <View style={styles.phoneInputContainer}>
-                            {phoneNumber.map((digit, index) => (
-                                <TextInput
-                                    key={index}
-                                    ref={(ref) => { inputs.current[index] = ref; }}
-                                    style={styles.phoneInput}
-                                    value={digit}
-                                    onChangeText={(text) => handlePhoneChange(text, index)}
-                                    onKeyPress={({ nativeEvent }) => handleBackspace(nativeEvent.key, index)}
-                                    keyboardType="number-pad"
-                                    maxLength={1}
-                                    selectTextOnFocus
-                                />
-                            ))}
-                        </View>
+                            {/* Welcome Section */}
+                            <View style={styles.welcomeSection}>
+                                <MonoText size="xxl" weight="bold" color={colors.text} style={styles.welcomeTitle}>
+                                    Order groceries{'\n'}in minutes
+                                </MonoText>
+                                <MonoText size="s" color={colors.textLight} style={styles.welcomeSubtitle}>
+                                    Login/Sign up to place your order
+                                </MonoText>
+                            </View>
 
-                        <PillButton
-                            title="SEND OTP"
-                            onPress={() => handleSendOtp().catch(() => Alert.alert('Error', 'Failed to send OTP'))}
-                            disabled={!isPhoneValid}
-                            loading={loading}
-                            style={styles.button}
-                        />
-                    </View>
+                            {/* Phone Input Section */}
+                            <View style={styles.inputSection}>
+                                <View style={styles.phoneInputContainer}>
+                                    <MonoText size="xs" weight="bold" color={colors.textLight} style={styles.phoneLabel}>
+                                        MOBILE NUMBER
+                                    </MonoText>
+                                    <View style={styles.inputWrapper}>
+                                        <View style={styles.countryCode}>
+                                            <MonoText style={styles.flagText}>🇮🇳</MonoText>
+                                            <MonoText weight="bold" color={colors.text}>+91</MonoText>
+                                        </View>
+                                        <TextInput
+                                            ref={inputRef}
+                                            style={styles.phoneInput}
+                                            value={phoneNumber}
+                                            onChangeText={handlePhoneChange}
+                                            placeholder="00000 00000"
+                                            placeholderTextColor="#D1D5DB"
+                                            keyboardType="number-pad"
+                                            maxLength={10}
+                                        />
+                                        {phoneNumber.length === 10 && (
+                                            <View style={styles.validIcon}>
+                                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                                    <Circle cx="12" cy="12" r="10" fill={colors.success} />
+                                                    <Path d="M8 12l2.5 2.5L16 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                </Svg>
+                                            </View>
+                                        )}
+                                    </View>
+                                </View>
 
-                    {/* Delivery Partner Link - Minimalistic */}
-                    <View style={styles.partnerSection}>
-                        <View style={styles.dividerRow}>
-                            <View style={styles.dividerLine} />
-                            <MonoText size="xs" color={colors.textLight} style={styles.dividerText}>
-                                Are you a delivery partner?
-                            </MonoText>
-                            <View style={styles.dividerLine} />
+                                {/* Continue/Send OTP Button - Glass Style */}
+                                <TouchableOpacity
+                                    style={styles.continueBtn}
+                                    onPress={() => handleSendOtp().catch(() => Alert.alert('Error', 'Failed to send OTP'))}
+                                    disabled={!isPhoneValid || loading}
+                                    activeOpacity={0.8}
+                                >
+                                    <BlurView
+                                        style={StyleSheet.absoluteFill}
+                                        blurType="light"
+                                        blurAmount={15}
+                                        reducedTransparencyFallbackColor="white"
+                                    />
+                                    <LinearGradient
+                                        colors={['rgba(255, 71, 0, 0.1)', 'rgba(255, 71, 0, 0.05)']}
+                                        style={styles.buttonGradient}
+                                    >
+                                        <MonoText weight="bold" color={colors.primary} size="m">
+                                            {loading ? 'Sending OTP...' : 'Continue'}
+                                        </MonoText>
+                                        {!loading && (
+                                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ marginLeft: 8 }}>
+                                                <Path d="M5 12h14M12 5l7 7-7 7" stroke={colors.primary} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                                            </Svg>
+                                        )}
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Delivery Partner Link */}
+                            <View style={styles.partnerSection}>
+                                <TouchableOpacity
+                                    style={styles.partnerLink}
+                                    onPress={() => navigation.navigate('PartnerLogin')}
+                                    activeOpacity={0.7}
+                                >
+                                    <MonoText size="s" color={colors.textLight}>
+                                        Are you a delivery partner?{' '}
+                                    </MonoText>
+                                    <MonoText size="s" color={colors.primary} weight="bold">
+                                        Login Here
+                                    </MonoText>
+                                </TouchableOpacity>
+                            </View>
                         </View>
-                        <TouchableOpacity
-                            style={styles.partnerLink}
-                            onPress={() => navigation.navigate('PartnerLogin')}
-                        >
-                            <MonoText size="s" color={colors.textLight} weight="medium">
-                                Partner Login →
-                            </MonoText>
-                        </TouchableOpacity>
-                    </View>
-                </ScrollView>
-            </KeyboardAvoidingView>
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            </SafeAreaView>
 
             <OtpBottomSheet
                 visible={otpVisible}
                 onClose={() => setOtpVisible(false)}
-                phoneNumber={phoneNumber.join('')}
+                phoneNumber={phoneNumber}
                 onVerify={handleVerifyOtp}
                 onResend={handleSendOtp}
             />
-        </SafeAreaView>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.secondary, // Creamy White
+        backgroundColor: colors.secondary,
+    },
+    gradient: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    safeArea: {
+        flex: 1,
     },
     keyboardView: {
         flex: 1,
     },
     scrollContent: {
         flexGrow: 1,
-        padding: spacing.l,
         justifyContent: 'center',
+        padding: spacing.xl,
     },
-    logoContainer: {
-        alignItems: 'center',
-        marginBottom: spacing.xxl,
+    // Decorative blur circles
+    blurCircle: {
+        position: 'absolute',
+        borderRadius: 999,
     },
-    logo: {
-        width: 120,
-        height: 120,
-        marginBottom: spacing.m,
-    },
-    tagline: {
-        textAlign: 'center',
-        color: colors.primary,
-    },
-    inputSection: {
-        marginBottom: spacing.xl,
-    },
-    phoneLabelRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: spacing.m,
-    },
-    countryCode: {
-        backgroundColor: colors.primary,
-        paddingHorizontal: spacing.s,
-        paddingVertical: 4,
-        borderRadius: 12,
-        marginRight: spacing.s,
-    },
-    enterText: {
-        marginTop: 2,
-    },
-    phoneInputContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginBottom: spacing.xl,
-    },
-    phoneInput: {
-        width: 30, // Adjusted for 10 digits
-        height: 40,
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: 6,
-        textAlign: 'center',
-        fontSize: 16,
-        fontFamily: 'NotoSansMono-Regular',
-        color: colors.text,
-        backgroundColor: colors.white,
-        padding: 0,
-    },
-    button: {
-        width: '80%',
-        alignSelf: 'center',
-        marginTop: spacing.m,
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 8,
-        borderRadius: 25,
-    },
-    customerBadge: {
-        alignSelf: 'center',
+    blurCircle1: {
+        width: 300,
+        height: 300,
         backgroundColor: `${colors.primary}15`,
+        top: -100,
+        right: -50,
+    },
+    blurCircle2: {
+        width: 200,
+        height: 200,
+        backgroundColor: '#FF6B2B10',
+        bottom: 50,
+        left: -50,
+    },
+    // Content Layout
+    contentContainer: {
+        marginTop: spacing.xl,
+    },
+    // Customer Badge
+    customerBadge: {
+        alignSelf: 'flex-start',
+        backgroundColor: 'rgba(255,255,255,0.8)',
         paddingHorizontal: spacing.m,
         paddingVertical: spacing.xs,
         borderRadius: 20,
-        marginBottom: spacing.m,
+        marginBottom: spacing.l,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.05)',
     },
+    // Welcome
     welcomeSection: {
-        alignItems: 'center',
-        marginBottom: spacing.xl,
+        marginBottom: 40,
     },
-    partnerSection: {
-        marginTop: spacing.xl,
-    },
-    dividerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
+    welcomeTitle: {
+        fontSize: 36,
+        lineHeight: 44,
+        letterSpacing: -0.5,
         marginBottom: spacing.s,
     },
-    dividerLine: {
-        flex: 1,
-        height: 1,
-        backgroundColor: colors.border,
+    welcomeSubtitle: {
+        fontSize: 16,
+        lineHeight: 24,
     },
-    dividerText: {
-        marginHorizontal: spacing.s,
+    // Input Section
+    inputSection: {
+        marginBottom: spacing.xl,
+    },
+    phoneInputContainer: {
+        marginBottom: spacing.l,
+    },
+    phoneLabel: {
+        marginBottom: spacing.m,
+        marginLeft: spacing.xs,
+        letterSpacing: 0.5,
+    },
+    inputWrapper: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        height: 64,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 24,
+        paddingHorizontal: spacing.m,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.06)',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.06,
+                shadowRadius: 16,
+            },
+            android: {
+                elevation: 2,
+            },
+        }),
+    },
+    countryCode: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingRight: spacing.m,
+        borderRightWidth: 1,
+        borderRightColor: '#F0F0F0',
+        marginRight: spacing.m,
+    },
+    flagText: {
+        fontSize: 20,
+        marginRight: 6,
+    },
+    phoneInput: {
+        flex: 1,
+        fontFamily: 'NotoSansMono-Medium',
+        fontSize: 18,
+        color: colors.text,
+        letterSpacing: 1.5,
+        height: '100%',
+    },
+    validIcon: {
+        marginLeft: spacing.s,
+    },
+    // Liquid Button
+    continueBtn: {
+        height: 60,
+        borderRadius: 20,
+        overflow: 'hidden',
+        marginTop: spacing.xl,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 71, 0, 0.2)',
+    },
+    buttonGradient: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 20,
+    },
+    buttonGloss: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: '50%',
+        backgroundColor: 'rgba(255,255,255,0.15)',
+    },
+    // Partner Section
+    partnerSection: {
+        marginTop: spacing.xl,
+        alignItems: 'center',
     },
     partnerLink: {
-        alignItems: 'center',
         padding: spacing.s,
+        flexDirection: 'row',
+        alignItems: 'center',
     },
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, Image, Dimensions } from 'react-native';
+import { View, StyleSheet, Image, Dimensions, Platform } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
@@ -63,14 +63,20 @@ const styles = StyleSheet.create({
         marginVertical: spacing.l,
         height: 200,
         borderRadius: 24,
-        shadowColor: colors.primary,
-        shadowOffset: {
-            width: 0,
-            height: 8,
-        },
-        shadowOpacity: 0.25,
-        shadowRadius: 16,
-        elevation: 8,
+        ...Platform.select({
+            ios: {
+                shadowColor: colors.primary,
+                shadowOffset: {
+                    width: 0,
+                    height: 8,
+                },
+                shadowOpacity: 0.25,
+                shadowRadius: 16,
+            },
+            android: {
+                elevation: 8,
+            },
+        }),
     },
     card: {
         flex: 1,

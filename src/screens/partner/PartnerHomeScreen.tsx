@@ -2,7 +2,6 @@ import React, { useEffect, useCallback, useState } from 'react';
 import {
     View,
     StyleSheet,
-    FlatList,
     RefreshControl,
     StatusBar,
     Platform,
@@ -11,12 +10,16 @@ import {
     PermissionsAndroid,
     Linking,
     Alert,
+    FlatList,
 } from 'react-native';
 import GetLocation from 'react-native-get-location';
-import Svg, { Path, Circle } from 'react-native-svg';
+import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../../components/shared/MonoText';
+import { SkeletonItem } from '../../components/shared/SkeletonLoader';
 import { AvailableOrderCard } from '../../components/partner/AvailableOrderCard';
 import { OrderDetailModal } from '../../components/partner/OrderDetailModal';
 import { PartnerHeader } from '../../components/partner/PartnerHeader';
@@ -29,6 +32,8 @@ import { DeliveryPartner } from '../../types/auth';
 import { logger } from '../../utils/logger';
 
 export const PartnerHomeScreen = () => {
+    const navigation = useNavigation<any>();
+    const insets = useSafeAreaInsets();
     const { user } = useAuthStore();
     const {
         availableOrders,
@@ -50,21 +55,11 @@ export const PartnerHomeScreen = () => {
     const partnerUser = user as DeliveryPartner | null;
     const branchId = partnerUser?.branch;
     const partnerId = user?._id;
-    const partnerName = user?.name || 'Partner';
-
-    // Debug log to help identify issues
-    useEffect(() => {
-        logger.debug('Partner', 'User Data:', JSON.stringify(user, null, 2));
-        logger.debug('Partner', 'Branch ID:', branchId);
-    }, [user, branchId]);
 
     // Fetch orders on mount
     useEffect(() => {
         if (branchId) {
-            logger.log('Fetching available orders for branch:', branchId);
             fetchAvailableOrders(branchId);
-        } else {
-            logger.warn('No branch ID found - cannot fetch available orders');
         }
     }, [branchId]);
 
@@ -72,21 +67,15 @@ export const PartnerHomeScreen = () => {
     useEffect(() => {
         if (!branchId || !partnerId) return;
 
-        const socket = socketService.connect();
-
-        // Join branch room for available orders
+        socketService.connect();
         socketService.joinBranchRoom(branchId);
         socketService.joinDeliveryPartnerRoom(partnerId);
 
-        // Listen for new orders
         socketService.on('newOrderAvailable', (order: PartnerOrder) => {
-            logger.log('New order available:', order.orderId);
             addAvailableOrder(order);
         });
 
-        // Listen for orders accepted by other partners
         socketService.on('orderAcceptedByOther', (orderId: string) => {
-            logger.log('Order accepted by another partner:', orderId);
             removeAvailableOrder(orderId);
         });
 
@@ -113,7 +102,6 @@ export const PartnerHomeScreen = () => {
     const handleAcceptOrder = async (order: PartnerOrder): Promise<boolean> => {
         if (!partnerId) return false;
 
-        // Check location permission before accepting
         try {
             if (Platform.OS === 'android') {
                 const granted = await PermissionsAndroid.request(
@@ -125,7 +113,6 @@ export const PartnerHomeScreen = () => {
                 }
             }
 
-            // Check if location is actually enabled
             try {
                 await GetLocation.getCurrentPosition({
                     enableHighAccuracy: true,
@@ -136,7 +123,11 @@ export const PartnerHomeScreen = () => {
                 return false;
             }
 
-            return await acceptOrder(order._id, partnerId);
+            const success = await acceptOrder(order._id, partnerId);
+            if (success) {
+                navigation.navigate('PartnerOrderTracking', { order });
+            }
+            return success;
         } catch (error) {
             logger.error('handleAcceptOrder error', error);
             setShowLocationModal(true);
@@ -153,13 +144,11 @@ export const PartnerHomeScreen = () => {
         setShowLocationModal(false);
     };
 
-    // Handle modal close
     const handleModalClose = () => {
         setModalVisible(false);
         setSelectedOrder(null);
     };
 
-    // Render empty state
     const renderEmpty = () => {
         if (isLoadingAvailable) return null;
 
@@ -182,11 +171,10 @@ export const PartnerHomeScreen = () => {
         );
     };
 
-    // Render error state
     if (availableError && availableOrders.length === 0) {
         return (
             <View style={[styles.container, styles.center]}>
-                <StatusBar barStyle="dark-content" backgroundColor={colors.primary} />
+                <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
                 <MonoText size="l" weight="bold" color={colors.error} style={{ marginBottom: spacing.s }}>
                     Oops!
                 </MonoText>
@@ -205,50 +193,78 @@ export const PartnerHomeScreen = () => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor={colors.primary} />
+            <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
             {/* Header with Logout */}
             <PartnerHeader variant="primary" />
 
-            {/* Order Count Badge */}
-            <View style={styles.orderCountSection}>
-                <View style={styles.orderCountBadge}>
-                    <MonoText size="xxl" weight="bold" color={colors.primary}>
-                        {availableOrders.length}
-                    </MonoText>
-                    <MonoText size="xxs" color={colors.textLight}>
-                        AVAILABLE
-                    </MonoText>
+            {/* Fixed Subheader - Order Queue */}
+            <View style={[
+                styles.fixedSubheader,
+                {
+                    top: Platform.OS === 'android'
+                        ? (StatusBar.currentHeight || 24) + 80
+                        : insets.top + 80
+                }
+            ]}>
+                <View style={styles.subheaderContent}>
+                    <View style={styles.subheaderLeft}>
+                        <MonoText size="m" weight="bold">Order Queue</MonoText>
+                    </View>
+                    <View style={styles.orderCountChip}>
+                        <MonoText size="m" weight="bold" color={colors.primary}>
+                            {availableOrders.length}
+                        </MonoText>
+                        {isLoadingAvailable && (
+                            <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: 8 }} />
+                        )}
+                    </View>
                 </View>
             </View>
 
-            {/* Section Title */}
-            <View style={styles.sectionHeader}>
-                <MonoText size="m" weight="bold">Available Orders</MonoText>
-                {isLoadingAvailable && (
-                    <ActivityIndicator size="small" color={colors.primary} />
-                )}
-            </View>
-
             {/* Orders List */}
-            <FlatList
-                data={availableOrders}
-                keyExtractor={(item) => item._id}
-                renderItem={({ item }) => (
-                    <AvailableOrderCard order={item} onPress={handleOrderPress} />
-                )}
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-                refreshControl={
-                    <RefreshControl
-                        refreshing={isLoadingAvailable}
-                        onRefresh={handleRefresh}
-                        colors={[colors.primary]}
-                        tintColor={colors.primary}
-                    />
-                }
-                ListEmptyComponent={renderEmpty}
-            />
+            {isLoadingAvailable ? (
+                <View style={styles.listContent}>
+                    {[1, 2, 3].map((i) => (
+                        <View key={`skeleton-${i}`} style={styles.skeletonCard}>
+                            <View style={styles.skeletonHeader}>
+                                <SkeletonItem width={120} height={20} borderRadius={4} />
+                                <SkeletonItem width={80} height={20} borderRadius={12} />
+                            </View>
+                            <View style={{ marginTop: 12 }}>
+                                <SkeletonItem width={200} height={16} borderRadius={4} style={{ marginBottom: 8 }} />
+                                <SkeletonItem width={150} height={16} borderRadius={4} />
+                            </View>
+                            <View style={{ marginTop: 16, flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <SkeletonItem width={80} height={36} borderRadius={12} />
+                                <SkeletonItem width={80} height={36} borderRadius={12} />
+                            </View>
+                        </View>
+                    ))}
+                </View>
+            ) : (
+                <FlatList
+                    data={availableOrders}
+                    keyExtractor={(item) => item._id}
+                    renderItem={({ item }) => (
+                        <AvailableOrderCard order={item} onPress={handleOrderPress} />
+                    )}
+                    contentContainerStyle={styles.listContent}
+                    showsVerticalScrollIndicator={true}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={isLoadingAvailable}
+                            onRefresh={handleRefresh}
+                            colors={[colors.primary]}
+                            tintColor={colors.primary}
+                            progressViewOffset={Platform.OS === 'ios' ? 0 : 200}
+                        />
+                    }
+                    ListEmptyComponent={renderEmpty}
+                />
+            )}
+
+
 
             {/* Order Detail Modal */}
             <OrderDetailModal
@@ -278,65 +294,89 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: spacing.l,
     },
-    header: {
-        backgroundColor: colors.primary,
-        paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + spacing.m : 50,
-        paddingBottom: spacing.l,
+    fixedSubheader: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        zIndex: 99,
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
         paddingHorizontal: spacing.m,
-        borderBottomLeftRadius: 24,
-        borderBottomRightRadius: 24,
+        paddingVertical: spacing.s,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0, 0, 0, 0.05)',
+        marginTop: -7,
     },
-    headerContent: {
+    subheaderContent: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
     },
-    greetingRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    profileCircle: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: colors.accent,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: spacing.s,
-        borderWidth: 2,
-        borderColor: colors.white,
-    },
-    greetingText: {
-        justifyContent: 'center',
-    },
+
+
     orderCountBadge: {
         backgroundColor: colors.white,
-        paddingHorizontal: spacing.m,
-        paddingVertical: spacing.s,
-        borderRadius: 16,
+        paddingHorizontal: spacing.xl,
+        paddingVertical: spacing.m,
+        borderRadius: 24,
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.05,
+                shadowRadius: 16,
+            },
+            android: {
+                elevation: 4,
+            },
+        }),
+        borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.03)',
     },
-    orderCountSection: {
+    subheader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        marginTop: -spacing.l,
-        marginBottom: spacing.s,
+        backgroundColor: colors.white,
+        padding: spacing.m,
+        borderRadius: 16,
+        marginBottom: spacing.m,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.05,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 2,
+            },
+        }),
+    },
+    subheaderLeft: {
+        flex: 1,
+    },
+    orderCountChip: {
+        backgroundColor: `${colors.primary}15`,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        minWidth: 50,
+        alignItems: 'center',
     },
     sectionHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: spacing.m,
+        paddingHorizontal: spacing.s,
         paddingTop: spacing.m,
-        paddingBottom: spacing.s,
+        paddingBottom: spacing.m,
     },
     listContent: {
         paddingHorizontal: spacing.m,
+        paddingTop: Platform.OS === 'ios' ? 185 : 200, // Header + subheader padding
         paddingBottom: 100,
+
     },
     emptyContainer: {
         flex: 1,
@@ -365,5 +405,27 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         paddingHorizontal: 24,
         borderRadius: 12,
+    },
+    skeletonCard: {
+        backgroundColor: colors.white,
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 12,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.05,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 2,
+            },
+        }),
+    },
+    skeletonHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
     },
 });

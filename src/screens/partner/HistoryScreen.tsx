@@ -8,23 +8,24 @@ import {
     Platform,
     TouchableOpacity,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../../components/shared/MonoText';
+import { SkeletonItem } from '../../components/shared/SkeletonLoader';
 import { HistoryOrderCard } from '../../components/partner/HistoryOrderCard';
-import { PartnerHeader } from '../../components/partner/PartnerHeader';
 import { usePartnerStore } from '../../store/partnerStore';
 import { useAuthStore } from '../../store/authStore';
 
 type FilterType = 'all' | 'delivered' | 'cancelled';
 
 export const HistoryScreen = () => {
+    const insets = useSafeAreaInsets();
     const { user } = useAuthStore();
     const {
         historyOrders,
         isLoadingHistory,
-        historyError,
         fetchHistoryOrders,
     } = usePartnerStore();
 
@@ -56,7 +57,8 @@ export const HistoryScreen = () => {
     const cancelledCount = historyOrders.filter(o => o.status === 'cancelled').length;
     const totalEarnings = historyOrders
         .filter(o => o.status === 'delivered')
-        .reduce((sum, o) => sum + o.totalPrice, 0);
+        .reduce((sum, o) => sum + (o.deliveryFee || 0), 0);
+    const totalOrders = historyOrders.length;
 
     // Render empty state
     const renderEmpty = () => {
@@ -65,7 +67,7 @@ export const HistoryScreen = () => {
         return (
             <View style={styles.emptyContainer}>
                 <View style={styles.emptyIconContainer}>
-                    <Svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke={colors.border} strokeWidth="1.5">
+                    <Svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={colors.border} strokeWidth="1.5">
                         <Circle cx="12" cy="12" r="10" />
                         <Path d="M12 6v6l4 2" />
                     </Svg>
@@ -80,26 +82,31 @@ export const HistoryScreen = () => {
         );
     };
 
-    // Render header with stats
+    // Render stats section inside list
     const renderHeader = () => (
         <View style={styles.statsSection}>
-            <View style={[styles.statCard, { backgroundColor: `${colors.accent}15` }]}>
-                <MonoText size="xxl" weight="bold" color={colors.accent}>
-                    {deliveredCount}
-                </MonoText>
-                <MonoText size="xs" color={colors.textLight}>Delivered</MonoText>
-            </View>
-            <View style={[styles.statCard, { backgroundColor: `${colors.primary}15` }]}>
-                <MonoText size="xxl" weight="bold" color={colors.primary}>
-                    ₹{totalEarnings.toLocaleString()}
-                </MonoText>
-                <MonoText size="xs" color={colors.textLight}>Total Value</MonoText>
-            </View>
-            <View style={[styles.statCard, { backgroundColor: `${colors.error}10` }]}>
-                <MonoText size="xxl" weight="bold" color={colors.error}>
-                    {cancelledCount}
-                </MonoText>
-                <MonoText size="xs" color={colors.textLight}>Cancelled</MonoText>
+            {/* Stats Cards Row */}
+            <View style={styles.statsRow}>
+                <View style={[styles.statCard, styles.statCardPrimary]}>
+                    <MonoText size="xxl" weight="bold" color={colors.white}>
+                        {deliveredCount}
+                    </MonoText>
+                    <MonoText size="xxs" color="rgba(255,255,255,0.8)">Delivered</MonoText>
+                </View>
+
+                <View style={[styles.statCard, styles.statCardAccent]}>
+                    <MonoText size="xxl" weight="bold" color={colors.white}>
+                        ₹{totalEarnings.toLocaleString()}
+                    </MonoText>
+                    <MonoText size="xxs" color="rgba(255,255,255,0.8)">Earnings</MonoText>
+                </View>
+
+                <View style={[styles.statCard, styles.statCardError]}>
+                    <MonoText size="xxl" weight="bold" color={colors.white}>
+                        {cancelledCount}
+                    </MonoText>
+                    <MonoText size="xxs" color="rgba(255,255,255,0.8)">Cancelled</MonoText>
+                </View>
             </View>
         </View>
     );
@@ -108,13 +115,13 @@ export const HistoryScreen = () => {
         <View style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor={colors.white} />
 
-            {/* Header with Logout */}
-            <PartnerHeader title="Order History" showProfile={false} variant="white" />
-
-            {/* Order Count */}
-            <View style={styles.orderCountRow}>
+            {/* Fixed Header */}
+            <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+                <MonoText size="xl" weight="bold" color={colors.text}>
+                    Order History
+                </MonoText>
                 <MonoText size="xs" color={colors.textLight}>
-                    {historyOrders.length} total orders
+                    {totalOrders} total orders
                 </MonoText>
             </View>
 
@@ -136,28 +143,62 @@ export const HistoryScreen = () => {
                         >
                             {filter.charAt(0).toUpperCase() + filter.slice(1)}
                         </MonoText>
+                        {filter !== 'all' && (
+                            <View style={[
+                                styles.filterCount,
+                                activeFilter === filter && styles.filterCountActive
+                            ]}>
+                                <MonoText
+                                    size="xxs"
+                                    weight="bold"
+                                    color={activeFilter === filter ? colors.primary : colors.textLight}
+                                >
+                                    {filter === 'delivered' ? deliveredCount : cancelledCount}
+                                </MonoText>
+                            </View>
+                        )}
                     </TouchableOpacity>
                 ))}
             </View>
 
             {/* History List */}
-            <FlatList
-                data={filteredOrders}
-                keyExtractor={(item) => item._id}
-                renderItem={({ item }) => <HistoryOrderCard order={item} />}
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-                ListHeaderComponent={historyOrders.length > 0 ? renderHeader : null}
-                refreshControl={
-                    <RefreshControl
-                        refreshing={isLoadingHistory}
-                        onRefresh={handleRefresh}
-                        colors={[colors.primary]}
-                        tintColor={colors.primary}
-                    />
-                }
-                ListEmptyComponent={renderEmpty}
-            />
+            {isLoadingHistory ? (
+                <View style={styles.listContent}>
+                    {renderHeader()}
+                    {[1, 2, 3, 4, 5].map((i) => (
+                        <View key={`skeleton-${i}`} style={styles.skeletonCard}>
+                            <View style={styles.skeletonHeader}>
+                                <SkeletonItem width={100} height={20} borderRadius={4} />
+                                <SkeletonItem width={60} height={20} borderRadius={12} />
+                            </View>
+                            <View style={{ marginTop: 12 }}>
+                                <SkeletonItem width={180} height={16} borderRadius={4} />
+                            </View>
+                            <View style={{ marginTop: 12 }}>
+                                <SkeletonItem width={120} height={14} borderRadius={4} />
+                            </View>
+                        </View>
+                    ))}
+                </View>
+            ) : (
+                <FlatList
+                    data={filteredOrders}
+                    keyExtractor={(item) => item._id}
+                    renderItem={({ item }) => <HistoryOrderCard order={item} />}
+                    contentContainerStyle={styles.listContent}
+                    showsVerticalScrollIndicator={false}
+                    ListHeaderComponent={historyOrders.length > 0 ? renderHeader : null}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={isLoadingHistory}
+                            onRefresh={handleRefresh}
+                            colors={[colors.primary]}
+                            tintColor={colors.primary}
+                        />
+                    }
+                    ListEmptyComponent={renderEmpty}
+                />
+            )}
         </View>
     );
 };
@@ -165,47 +206,65 @@ export const HistoryScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#FAFAFA',
+        backgroundColor: '#F8F9FA',
     },
     header: {
         backgroundColor: colors.white,
-        paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + spacing.m : 50,
+        paddingHorizontal: spacing.m,
         paddingBottom: spacing.m,
-        paddingHorizontal: spacing.m,
         borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    orderCountRow: {
-        paddingHorizontal: spacing.m,
-        paddingBottom: spacing.s,
-        backgroundColor: colors.white,
+        borderBottomColor: 'rgba(0,0,0,0.04)',
     },
     filterContainer: {
         flexDirection: 'row',
         backgroundColor: colors.white,
         paddingHorizontal: spacing.m,
-        paddingBottom: spacing.m,
+        paddingVertical: spacing.s,
         gap: spacing.s,
     },
     filterTab: {
-        paddingHorizontal: spacing.m,
-        paddingVertical: spacing.xs,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
         borderRadius: 20,
         backgroundColor: '#F0F0F0',
+        gap: 6,
     },
     filterTabActive: {
         backgroundColor: colors.primary,
     },
+    filterCount: {
+        backgroundColor: colors.white,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 10,
+    },
+    filterCountActive: {
+        backgroundColor: 'rgba(255,255,255,0.25)',
+    },
     statsSection: {
+        marginBottom: spacing.m,
+    },
+    statsRow: {
         flexDirection: 'row',
         gap: spacing.s,
-        marginBottom: spacing.m,
     },
     statCard: {
         flex: 1,
         alignItems: 'center',
-        padding: spacing.m,
-        borderRadius: 12,
+        paddingVertical: spacing.m,
+        paddingHorizontal: spacing.s,
+        borderRadius: 14,
+    },
+    statCardPrimary: {
+        backgroundColor: colors.primary,
+    },
+    statCardAccent: {
+        backgroundColor: colors.accent,
+    },
+    statCardError: {
+        backgroundColor: '#EF4444',
     },
     listContent: {
         padding: spacing.m,
@@ -218,10 +277,10 @@ const styles = StyleSheet.create({
         paddingTop: 100,
     },
     emptyIconContainer: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        backgroundColor: '#F0F0F0',
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#F5F5F5',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: spacing.m,
@@ -232,5 +291,18 @@ const styles = StyleSheet.create({
     emptySubtitle: {
         textAlign: 'center',
         lineHeight: 22,
+    },
+    skeletonCard: {
+        backgroundColor: colors.white,
+        borderRadius: 14,
+        padding: 16,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.03)',
+    },
+    skeletonHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
     },
 });

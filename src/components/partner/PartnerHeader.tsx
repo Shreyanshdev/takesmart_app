@@ -7,12 +7,13 @@ import {
     Platform,
     StatusBar,
 } from 'react-native';
-import Svg, { Path, Circle } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../shared/MonoText';
 import { useAuthStore } from '../../store/authStore';
 import { socketService } from '../../services/core/socket.service';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface PartnerHeaderProps {
     title?: string;
@@ -25,10 +26,11 @@ export const PartnerHeader: React.FC<PartnerHeaderProps> = ({
     showProfile = true,
     variant = 'primary',
 }) => {
+    const insets = useSafeAreaInsets();
     const { user, logout } = useAuthStore();
     const [showLogoutModal, setShowLogoutModal] = useState(false);
 
-    const partnerName = user?.name || 'Partner';
+    const partnerName = user?.name || 'Valued Partner';
     const isPrimary = variant === 'primary';
 
     const handleLogout = () => {
@@ -42,47 +44,70 @@ export const PartnerHeader: React.FC<PartnerHeaderProps> = ({
         <>
             <View style={[
                 styles.header,
-                isPrimary ? styles.headerPrimary : styles.headerWhite
+                isPrimary ? styles.headerPrimary : styles.headerWhite,
+                { paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : insets.top + (Platform.OS === 'ios' ? 10 : 0) }
             ]}>
-                {showProfile ? (
-                    <View style={styles.greetingRow}>
-                        <View style={styles.profileCircle}>
-                            <MonoText size="m" weight="bold" color={colors.white}>
-                                {partnerName.charAt(0).toUpperCase()}
-                            </MonoText>
+                <View style={styles.headerInner}>
+                    {showProfile ? (
+                        <View style={styles.greetingRow}>
+                            <View style={styles.profileCircle}>
+                                <MonoText size="l" weight="bold" color={isPrimary ? colors.primary : colors.white}>
+                                    {partnerName.charAt(0).toUpperCase()}
+                                </MonoText>
+                            </View>
+                            <View style={styles.greetingText}>
+                                <MonoText
+                                    size="s"
+                                    color={isPrimary ? `${colors.white}CC` : colors.textLight}
+                                    style={styles.greetingSub}
+                                >
+                                    Hello,
+                                </MonoText>
+                                <MonoText
+                                    size="xl"
+                                    weight="bold"
+                                    color={isPrimary ? colors.white : colors.text}
+                                    style={styles.greetingMain}
+                                >
+                                    {partnerName}
+                                </MonoText>
+                            </View>
                         </View>
-                        <View style={styles.greetingText}>
-                            <MonoText size="xs" color={isPrimary ? colors.text : colors.textLight}>
-                                Hello,
-                            </MonoText>
-                            <MonoText size="l" weight="bold" color={isPrimary ? colors.black : colors.text}>
-                                {partnerName}
-                            </MonoText>
-                        </View>
-                    </View>
-                ) : (
-                    <MonoText size="xl" weight="bold" color={isPrimary ? colors.black : colors.text}>
-                        {title}
-                    </MonoText>
-                )}
+                    ) : (
+                        <MonoText
+                            size="l"
+                            weight="bold"
+                            color={isPrimary ? colors.white : colors.text}
+                            style={styles.title}
+                        >
+                            {title}
+                        </MonoText>
+                    )}
 
-                <TouchableOpacity
-                    style={[
-                        styles.logoutButton,
-                        isPrimary ? styles.logoutButtonPrimary : styles.logoutButtonWhite
-                    ]}
-                    onPress={() => setShowLogoutModal(true)}
-                    activeOpacity={0.7}
-                >
-                    <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isPrimary ? colors.error : colors.error} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                        <Path d="M16 17l5-5-5-5" />
-                        <Path d="M21 12H9" />
-                    </Svg>
-                    <MonoText size="xs" weight="semiBold" color={colors.error} style={{ marginLeft: 4 }}>
-                        Logout
-                    </MonoText>
-                </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setShowLogoutModal(true)}
+                        activeOpacity={0.7}
+                    >
+                        <View style={[
+                            styles.logoutButton,
+                            isPrimary ? styles.logoutButtonPrimary : styles.logoutButtonWhite
+                        ]}>
+                            <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isPrimary ? colors.white : colors.error} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                <Path d="M16 17l5-5-5-5" />
+                                <Path d="M21 12H9" />
+                            </Svg>
+                            <MonoText
+                                size="xs"
+                                weight="semiBold"
+                                color={isPrimary ? colors.white : colors.error}
+                                style={{ marginLeft: 4 }}
+                            >
+                                Logout
+                            </MonoText>
+                        </View>
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Logout Confirmation Modal */}
@@ -143,17 +168,32 @@ export const PartnerHeader: React.FC<PartnerHeaderProps> = ({
 
 const styles = StyleSheet.create({
     header: {
+        zIndex: 100,
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        paddingBottom: spacing.m,
+        paddingHorizontal: spacing.m,
+        ...Platform.select({
+            ios: {
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.1,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 4,
+            },
+        }),
+    },
+    headerInner: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + spacing.m : 50,
-        paddingBottom: spacing.m,
-        paddingHorizontal: spacing.m,
     },
     headerPrimary: {
         backgroundColor: colors.primary,
-        borderBottomLeftRadius: 24,
-        borderBottomRightRadius: 24,
     },
     headerWhite: {
         backgroundColor: colors.white,
@@ -166,18 +206,25 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     profileCircle: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: colors.accent,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: colors.white,
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: spacing.s,
-        borderWidth: 2,
-        borderColor: colors.white,
     },
     greetingText: {
         justifyContent: 'center',
+    },
+    greetingSub: {
+        lineHeight: 18,
+    },
+    greetingMain: {
+        lineHeight: 24,
+    },
+    title: {
+        fontSize: 20,
     },
     logoutButton: {
         flexDirection: 'row',
@@ -187,14 +234,11 @@ const styles = StyleSheet.create({
         borderRadius: 20,
     },
     logoutButtonPrimary: {
-        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
     },
     logoutButtonWhite: {
         backgroundColor: `${colors.error}10`,
-        borderWidth: 1,
-        borderColor: `${colors.error}30`,
     },
-    // Modal styles
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.5)',

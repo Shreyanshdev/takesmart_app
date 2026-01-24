@@ -1,5 +1,5 @@
 export const colors = {
-  primary: '#F5C518', // Golden Yellow (Ghee)
+  primary: '#FF4700', // Vibrant Orange (Brand)
   secondary: '#FFFDD0', // Creamy White (Milk/Curd)
   accent: '#4CAF50', // Fresh Green
   background: '#FFFFFF',

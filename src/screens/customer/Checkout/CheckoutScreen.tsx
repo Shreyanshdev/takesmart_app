@@ -1,24 +1,31 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert, Platform, ActivityIndicator, Image, FlatList } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert, Platform, ActivityIndicator, Image, FlatList, Modal } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import Svg, { Path, Circle, Line, Rect } from 'react-native-svg';
-import DateTimePicker from '@react-native-community/datetimepicker';
 // @ts-ignore
 import RazorpayCheckout from 'react-native-razorpay';
 import { RAZORPAY_KEY_ID } from '@env'; // Ensure you have this configured
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';
 import { MonoText } from '../../../components/shared/MonoText';
+import { ProductGridCard } from '../../../components/shared/ProductGridCard';
 import { useCartStore } from '../../../store/cart.store';
+import { useToastStore } from '../../../store/toast.store';
+import { productService, Product } from '../../../services/customer/product.service';
+import { ProductDetailsModal } from '../../../components/home/ProductDetailsModal';
 import { addressService, Address } from '../../../services/customer/address.service';
 import { orderService } from '../../../services/customer/order.service';
 import { branchService } from '../../../services/customer/branch.service';
+import { taxService, TaxSettings } from '../../../services/customer/tax.service';
 import { useAuthStore } from '../../../store/authStore';
-import { useSubscriptionCartStore } from '../../../store/subscriptionCart.store';
 import { useHomeStore } from '../../../store/home.store';
 import { logger } from '../../../utils/logger';
+import { notifyOrderPlaced } from '../../../services/notification/notification.service';
+import { ApplyCouponModal } from '../../../components/checkout/ApplyCouponModal';
+import { CheckoutAddressModal } from '../../../components/checkout/CheckoutAddressModal';
+import { CheckoutSkeleton } from '../../../components/shared/CheckoutSkeleton';
+import { CouponData, couponService } from '../../../services/customer/coupon.service';
 
 // Simple Haversine fallback to avoid extra dep
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -34,25 +41,26 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
 
 const { width } = Dimensions.get('window');
 
-// Maximum delivery distance in kilometers
-const MAX_DELIVERY_DISTANCE_KM = 30;
-
 type CheckoutRouteParams = {
-    addressId: string;
-    mode: 'cart' | 'subscription'; // To differentiate flows if needed
-    subscriptionItems?: any[]; // Pass items if mode is subscription (since sub cart is single item usually)
+    addressId?: string;
+    showAddressModal?: boolean;
 };
 
 export const CheckoutScreen = () => {
     const navigation = useNavigation<any>();
     const route = useRoute<RouteProp<{ params: CheckoutRouteParams }, 'params'>>();
-    const { addressId, mode = 'cart', subscriptionItems = [] } = route.params || {};
+    const { addressId: routeAddressId, showAddressModal } = route.params || {};
 
-    const { items, getTotalPrice, clearCart: clearRegularCart } = useCartStore();
-    const { clearCart: clearSubscriptionCart } = useSubscriptionCartStore();
+    const { items, getTotalPrice, clearCart, addToCart, removeFromCart, deleteFromCart, getItemQuantity } = useCartStore();
+    const { showToast } = useToastStore();
     const { user } = useAuthStore();
-    // specific branch for this order, not the user's global location
+    const { normalProducts } = useHomeStore();
     const [allocatedBranch, setAllocatedBranch] = useState<any>(null);
+
+    // Details Modal State
+    const [detailsModalVisible, setDetailsModalVisible] = useState(false);
+    const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+    const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
 
     const [address, setAddress] = useState<Address | null>(null);
     const [distanceKm, setDistanceKm] = useState(0);
@@ -60,310 +68,397 @@ export const CheckoutScreen = () => {
     const [placingOrder, setPlacingOrder] = useState(false);
     const [loading, setLoading] = useState(true);
     const [serviceAvailable, setServiceAvailable] = useState(true);
+    const [taxRates, setTaxRates] = useState<TaxSettings>({ sgst: 0, cgst: 0 });
 
-    // Subscription State
-    const [slot, setSlot] = useState<'morning' | 'evening'>('morning');
-    const [startDate, setStartDate] = useState(() => {
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        return tomorrow;
-    });
-    const [showDatePicker, setShowDatePicker] = useState(false);
+    // Coupon state
+    const [couponModalVisible, setCouponModalVisible] = useState(false);
+    const [appliedCoupon, setAppliedCoupon] = useState<CouponData | null>(null);
+    const [couponDiscount, setCouponDiscount] = useState(0);
+    const [availableCouponsCount, setAvailableCouponsCount] = useState(0);
 
-    // Fetch Address & Branch Logic
-    useEffect(() => {
-        const init = async () => {
-            try {
-                if (!addressId) return;
-                setLoading(true);
+    // Payment method state
+    const [paymentMethod, setPaymentMethod] = useState<'online' | 'cod'>('online');
+    const [paymentModalVisible, setPaymentModalVisible] = useState(false);
 
-                // 1. Get Address
-                const addr = await addressService.getAddressById(addressId);
-                setAddress(addr);
+    // Remove Item Confirmation State
+    const [removeItemModalVisible, setRemoveItemModalVisible] = useState(false);
+    const [itemToRemove, setItemToRemove] = useState<any>(null);
 
-                if (addr.latitude && addr.longitude) {
-                    // 2. Get Nearest Branch for THIS address
-                    try {
-                        const branch = await branchService.getNearestBranch(addr.latitude, addr.longitude);
-                        setAllocatedBranch(branch); // branch service returns object with distance
-                        setServiceAvailable(true);
+    // Address Modal State
+    const [addressModalVisible, setAddressModalVisible] = useState(false);
+    const [selectedAddressId, setSelectedAddressId] = useState<string | null>(routeAddressId || null);
 
-                        // 3. Calc Metrics
-                        // Backend might return distance, but let's calc explicit path distance or use backend's
-                        // If backend returns distance in branch object:
-                        const dist = branch.distance || calculateDistance(
-                            branch.location.latitude,
-                            branch.location.longitude,
-                            addr.latitude,
-                            addr.longitude
-                        );
+    // Stock Validation State
+    const [isValidatingStock, setIsValidatingStock] = useState(false);
+    const [stockErrors, setStockErrors] = useState<Record<string, { status: string, message: string, available: number }>>({});
+    const [hasCriticalStockIssue, setHasCriticalStockIssue] = useState(false);
 
-                        setDistanceKm(Number(dist.toFixed(1)));
-                        setDeliveryCharge(orderService.calculateDeliveryCharge(dist));
+    const insets = useSafeAreaInsets();
 
-                    } catch (e) {
-                        // Branch service likely throws or returns null if no coverage (depending on implementation)
-                        // For now assuming if it fails, no service.
-                        logger.warn('No branch found for address', e);
-                        setServiceAvailable(false);
+    // Function to validate stock for all items in cart
+    const validateStock = async (forceAlert = false) => {
+        if (items.length === 0) return true;
+
+        try {
+            setIsValidatingStock(true);
+            const inventoryItems = items.map(item => ({
+                inventoryId: item.product.inventoryId || item.product._id,
+                quantity: item.quantity
+            }));
+
+            const result = await productService.validateCartStock(inventoryItems);
+
+            const errors: Record<string, any> = {};
+            let criticalIssue = false;
+
+            result.items.forEach(item => {
+                if (!item.available) {
+                    errors[item.inventoryId] = {
+                        status: item.status,
+                        message: item.message,
+                        available: item.availableStock
+                    };
+                    if (item.status === 'OUT_OF_STOCK' || item.status === 'NOT_FOUND') {
+                        criticalIssue = true;
                     }
                 }
-            } catch (err) {
-                logger.error('Checkout init failed', err);
-                Alert.alert("Error", "Could not load checkout details");
-            } finally {
-                setLoading(false);
+            });
+
+            setStockErrors(errors);
+            setHasCriticalStockIssue(criticalIssue);
+
+            if (forceAlert && !result.allAvailable) {
+                Alert.alert("Stock Update", result.message);
             }
-        };
-        init();
-    }, [addressId]);
 
-
-    // Subscription Logic
-    const getDeliveriesCount = (freq: string | undefined) => {
-        if (!freq) return 1;
-        switch (freq) {
-            case 'daily': return 30;
-            case 'alternate': return 15;
-            case 'weekly': return 5;
-            case 'monthly': return 1;
-            default: return 1;
+            return result.allAvailable;
+        } catch (err) {
+            console.error('Stock validation failed:', err);
+            return true; // Fallback to proceed if validation service fails
+        } finally {
+            setIsValidatingStock(false);
         }
     };
 
-    // Derived Data
-    const isSubscription = mode === 'subscription';
+    // Re-validate stock when items in cart change
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (items.length > 0) {
+                validateStock();
+            }
+        }, 500); // Debounce validation
 
-    // Ensure subscriptionItems is an array if present
-    const finalSubItems = useMemo(() => {
-        if (!isSubscription) return [];
-        if (Array.isArray(subscriptionItems)) return subscriptionItems;
-        return subscriptionItems ? [subscriptionItems] : [];
-    }, [subscriptionItems, isSubscription]);
+        return () => clearTimeout(timer);
+    }, [items]);
 
-    const displayItems = isSubscription ? finalSubItems : items;
+    // Function to load address and branch data
+    const loadAddressData = async (addrId: string) => {
+        try {
+            setLoading(true);
 
-    // For Subscription: Force delivery free, calculate monthly total
-    const subMonthlyTotal = useMemo(() => {
-        if (!isSubscription) return 0;
-        return finalSubItems.reduce((acc: number, item: any) => {
-            const price = item.product.discountPrice || item.product.price;
-            const count = getDeliveriesCount(item.frequency);
-            return acc + (price * item.quantity * count);
-        }, 0);
-    }, [isSubscription, finalSubItems]);
+            // 1. Get Address
+            const addr = await addressService.getAddressById(addrId);
+            setAddress(addr);
+
+            if (addr.latitude && addr.longitude) {
+                // 2. Get Nearest Branch for THIS address
+                try {
+                    const branch = await branchService.getNearestBranch(addr.latitude, addr.longitude);
+                    console.log('[Checkout] Branch response:', JSON.stringify({
+                        name: branch.name,
+                        distance: branch.distance,
+                        deliveryRadiusKm: branch.deliveryRadiusKm,
+                        isWithinRadius: branch.isWithinRadius
+                    }));
+
+                    setAllocatedBranch(branch);
+                    setServiceAvailable(true);
+
+                    // Use distance from backend, fallback to 0 if null
+                    const safeDist = branch.distance ?? 0;
+                    setDistanceKm(Number(safeDist.toFixed(1)));
+                    setDeliveryCharge(orderService.calculateDeliveryCharge(safeDist));
+                } catch (e) {
+                    logger.warn('No branch found for address', e);
+                    setServiceAvailable(false);
+                }
+            }
+        } catch (err) {
+            logger.error('Checkout init failed', err);
+            Alert.alert("Error", "Could not load checkout details");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Show address modal when screen gains focus with showAddressModal param
+    useFocusEffect(
+        React.useCallback(() => {
+            if (showAddressModal && !selectedAddressId) {
+                setAddressModalVisible(true);
+                setLoading(false);
+            }
+        }, [showAddressModal, selectedAddressId])
+    );
+
+    // Fetch Address & Branch Logic when address changes
+    useEffect(() => {
+        if (selectedAddressId) {
+            loadAddressData(selectedAddressId);
+        } else if (!showAddressModal) {
+            setLoading(false);
+        }
+
+        const fetchTax = async () => {
+            const rates = await taxService.getTaxRates();
+            setTaxRates(rates);
+        };
+        fetchTax();
+    }, [selectedAddressId]);
+
+    // Handle address selection from modal
+    const handleAddressSelect = (addrId: string) => {
+        setSelectedAddressId(addrId);
+        setAddressModalVisible(false);
+    };
+
+    // Handle back without address selection (goes back to previous screen)
+    const handleBackWithoutSelection = () => {
+        setAddressModalVisible(false);
+        navigation.goBack();
+    };
+
+    // Handle cancel - just close modal, keep existing address
+    const handleCancelModal = () => {
+        setAddressModalVisible(false);
+    };
+
+    // Handle add new address from modal
+    const handleAddNewAddress = () => {
+        setAddressModalVisible(false);
+        navigation.navigate('AddAddress', { fromCheckout: true });
+    };
+
+
+    // Derived Data - Cart only mode
+    const displayItems = items;
 
     const cartTotal = getTotalPrice();
-    // If subscription, use subMonthlyTotal. If cart, usage cartTotal + delivery
-    const finalDeliveryCharge = isSubscription ? 0 : deliveryHigh;
-    const grandTotal = isSubscription ? subMonthlyTotal : (cartTotal + finalDeliveryCharge);
+    const finalDeliveryCharge = deliveryHigh;
+    const baseTotal = cartTotal;
 
-    // Savings Calc
-    const savings = useMemo(() => {
-        if (isSubscription) {
-            return finalSubItems.reduce((acc: number, item: any) => {
-                const count = getDeliveriesCount(item.frequency);
-                const regular = item.product.price * item.quantity * count;
-                const deal = (item.product.discountPrice || item.product.price) * item.quantity * count;
-                return acc + (regular - deal);
-            }, 0);
-        }
+    // MRP Total (sum of MRP * quantity for all items)
+    const mrpTotal = useMemo(() => {
         return items.reduce((acc, item) => {
-            const regular = item.product.price * item.quantity;
-            const deal = (item.product.discountPrice || item.product.price) * item.quantity;
-            return acc + (regular - deal);
+            const mrp = item.product.price || item.product.discountPrice || 0;
+            return acc + (mrp * item.quantity);
         }, 0);
-    }, [items, isSubscription, finalSubItems]);
+    }, [items]);
 
-    // Check if delivery location is out of range (>30km)
-    const isOutOfRange = distanceKm > MAX_DELIVERY_DISTANCE_KM;
+    // Product discount (MRP - selling price)
+    const productDiscount = mrpTotal - baseTotal;
+
+    // Tax Calculations (applied to baseTotal)
+    const sgstAmount = (baseTotal * taxRates.sgst) / 100;
+    const cgstAmount = (baseTotal * taxRates.cgst) / 100;
+    const totalTax = sgstAmount + cgstAmount;
+
+    // Total discount (product + coupon)
+    const totalDiscount = productDiscount + couponDiscount;
+
+    // Apply coupon discount
+    const grandTotal = baseTotal + totalTax + finalDeliveryCharge - couponDiscount;
+    const estimatedDeliveryMins = Math.ceil((distanceKm || 0) * 5 + 15);
+
+    // Fetch available coupons count
+    useEffect(() => {
+        const fetchCouponsCount = async () => {
+            if (allocatedBranch?._id) {
+                try {
+                    const response = await couponService.getAvailableCoupons(allocatedBranch._id, user?._id);
+                    setAvailableCouponsCount(response.count || 0);
+                } catch (err) {
+                    console.error('Failed to fetch coupons count:', err);
+                }
+            }
+        };
+        fetchCouponsCount();
+    }, [allocatedBranch?._id, user?._id]);
+
+    // Suggestions for "Before you checkout" - sorted by discount percentage
+    const suggestionProducts = useMemo(() => {
+        if (!normalProducts || normalProducts.length === 0) return [];
+        return [...normalProducts]
+            .filter(p => !items.find(i => i.product._id === p._id || i.product.inventoryId === p._id))
+            .map(p => {
+                const variant = (p as any).variants?.[0] || p.variant;
+                const mrp = variant?.pricing?.mrp || 0;
+                const sp = variant?.pricing?.sellingPrice || 0;
+                const discountPercent = mrp > 0 ? ((mrp - sp) / mrp) * 100 : 0;
+                return { ...p, discountPercent };
+            })
+            .sort((a, b) => b.discountPercent - a.discountPercent)
+            .slice(0, 10);
+    }, [normalProducts, items]);
+
+    const handleApplyCoupon = (coupon: CouponData, discount: number) => {
+        setAppliedCoupon(coupon);
+        setCouponDiscount(discount);
+    };
+
+    const handleRemoveCoupon = () => {
+        setAppliedCoupon(null);
+        setCouponDiscount(0);
+    };
+
+    const handleAddToCartFromSuggestions = (product: Product, variant: any) => {
+        const cartItemId = variant?._id || variant?.inventoryId || product._id;
+        const productImage = variant?.variant?.images?.[0] || product.images?.[0] || product.image;
+
+        addToCart({
+            ...product,
+            _id: cartItemId,
+            name: product.name,
+            image: productImage || '',
+            price: variant?.pricing?.mrp || 0,
+            discountPrice: variant?.pricing?.sellingPrice || 0,
+            stock: variant?.stock || 0,
+            quantity: variant?.variant ? {
+                value: variant.variant.weightValue,
+                unit: variant.variant.weightUnit
+            } : undefined,
+            formattedQuantity: variant?.variant ? `${variant.variant.weightValue} ${variant.variant.weightUnit}` : undefined
+        } as any);
+    };
+
+    const handleProductPress = (product: Product, variantId?: string) => {
+        setSelectedProduct(product);
+        setSelectedVariantId(variantId || null);
+        setDetailsModalVisible(true);
+    };
+
+    // Savings Calc - use stored prices from cart items
+    const savings = useMemo(() => {
+        return items.reduce((acc, item) => {
+            // Use the stored price (MRP) and discountPrice (selling price) from cart item
+            const mrp = item.product.price || 0;
+            const sellingPrice = item.product.discountPrice ?? item.product.price ?? 0;
+            const regular = mrp * item.quantity;
+            const deal = sellingPrice * item.quantity;
+            return acc + Math.max(0, regular - deal);
+        }, 0);
+    }, [items]);
+
+    // Check if delivery location is out of range (uses branch's deliveryRadiusKm from backend)
+    // If isWithinRadius is explicitly false from backend, mark as out of range
+    // Also check if service is available (branch was found)
+    const isOutOfRange = !serviceAvailable || (allocatedBranch?.isWithinRadius === false);
 
     const handlePlaceOrder = async () => {
         if (!address || !allocatedBranch) return;
+
+        // Final stock check before payment
+        const isStockAvailable = await validateStock(true);
+        if (!isStockAvailable) return;
+
         setPlacingOrder(true);
 
         try {
-            if (isSubscription) {
-                // 1. Prepare Payload for Enhanced Subscription
-                const productsPayload = finalSubItems.map((item: any) => ({
-                    productId: item.product._id,
-                    selectedQuantity: item.product.formattedQuantity || (typeof item.product.quantity === 'object'
-                        ? `${item.product.quantity.value}${item.product.quantity.unit} `
-                        : `${item.product.quantity} `),
-                    animalType: item.product.animalTypes?.[0]?.type || 'cow',
-                    deliveryFrequency: item.frequency,
-                    count: item.quantity || 1,
-                    unitPrice: item.product.discountPrice || item.product.price,
-                    monthlyPrice: (item.product.discountPrice || item.product.price) * (item.quantity || 1) * getDeliveriesCount(item.frequency)
-                }));
+            // Track orderId for cleanup in case of failure
+            let createdOrderId: string | null = null;
 
-                const subscriptionPayload = {
-                    customerId: user?._id || '', // Fallback to empty string or handle undefined validation upstream
-                    products: productsPayload,
-                    slot,
-                    startDate: startDate.toISOString(),
-                    endDate: new Date(startDate.getTime() + (30 - 1) * 24 * 60 * 60 * 1000).toISOString(), // 29 days after start = 30 days inclusive
-                    addressId: addressId,
+            try {
+                // 1. Create Normal Order (Status: Pending Payment)
+                const orderPayload: any = {
+                    userId: user?._id || '',
                     branchId: allocatedBranch._id,
-                    branchName: allocatedBranch.name
+                    items: items.map(i => ({
+                        inventoryId: i.product.inventoryId || i.product._id,
+                        quantity: i.quantity
+                    })),
+                    addressId: selectedAddressId,
+                    totalPrice: grandTotal,
+                    deliveryFee: finalDeliveryCharge,
+                    sgst: taxRates.sgst,
+                    cgst: taxRates.cgst,
+                    couponCode: appliedCoupon?.code || null,
+                    couponDiscount: couponDiscount || 0,
+                    paymentMethod: 'online' as const
                 };
 
-                // 2. Create Subscription
-                const subResponse = await orderService.createEnhancedSubscription(subscriptionPayload);
-                const subscriptionId = subResponse.subscription._id;
-                const billAmount = subResponse.subscription.bill;
+                const orderResponse = await orderService.createOrder(orderPayload);
+                createdOrderId = orderResponse.order._id;
 
-                // 3. Create Payment Order
+                // 2. Create Payment Order (Razorpay)
                 const paymentOrderResponse = await orderService.createPaymentOrder({
-                    amount: billAmount,
+                    amount: grandTotal,
                     currency: 'INR',
-                    receipt: `receipt_${Date.now()}`,
-                    orderType: 'subscription'
+                    receipt: `order_${createdOrderId}`,
+                    orderType: 'order',
+                    orderId: createdOrderId || undefined
                 });
 
-                // 4. Open Razorpay
+                // 3. Open Razorpay
                 const options = {
-                    description: 'Subscription Payment',
-                    image: 'https://your-logo-url.com/logo.png', // Replace with app logo
+                    description: 'Order Payment',
+                    image: 'https://techsmart.com/images/logo.png',
                     currency: 'INR',
                     key: RAZORPAY_KEY_ID,
                     amount: paymentOrderResponse.amount,
-                    name: 'Lush & Pure',
+                    name: 'TechSmart',
                     order_id: paymentOrderResponse.id,
                     prefill: {
-                        email: 'user@example.com', // Get from user profile
-                        contact: '9999999999', // Get from user profile
-                        name: 'User Name' // Get from user profile
+                        email: user?.email || 'user@example.com',
+                        contact: user?.phone || '9999999999',
+                        name: user?.name || 'User Name'
                     },
                     theme: { color: colors.primary }
                 };
 
                 RazorpayCheckout.open(options).then(async (data: any) => {
-                    // 5. Verify Payment
+                    // 4. Verify Payment
                     await orderService.verifyPayment({
                         order_id: data.razorpay_order_id,
                         payment_id: data.razorpay_payment_id,
                         signature: data.razorpay_signature,
-                        subscriptionId: subscriptionId,
-                        amount: billAmount
+                        appOrderId: createdOrderId!,
+                        amount: grandTotal
                     });
 
-                    Alert.alert("Success", "Subscription activated successfully!", [
-                        {
-                            text: "OK", onPress: () => {
-                                useHomeStore.getState().fetchHomeData();
-                                clearSubscriptionCart();
-                                navigation.navigate('Home');
-                            }
-                        }
+                    notifyOrderPlaced(createdOrderId!);
+                    clearCart();
+                    Alert.alert("Order Placed", "Your order is on the way!", [
+                        { text: "Track Order", onPress: () => navigation.navigate('OrderTracking', { orderId: createdOrderId, from: 'checkout' }) },
+                        { text: "Home", onPress: () => navigation.navigate('Home') }
                     ]);
                 }).catch(async (error: any) => {
                     logger.error('Payment Error', error);
-                    Alert.alert("Payment Failed", "Something went wrong during payment. Please try again.");
-                    // Cleanup pending subscription
-                    try {
-                        await orderService.deleteSubscription(subscriptionId);
-                        logger.log('Cleaned up pending subscription:', subscriptionId);
-                    } catch (cleanupErr) {
-                        logger.error('Failed to cleanup subscription', cleanupErr);
-                    }
-                });
-
-            } else {
-                // Track orderId for cleanup in case of failure
-                let createdOrderId: string | null = null;
-
-                try {
-                    // 1. Create Normal Order (Status: Pending Payment)
-                    // Backend Expects: { userId, branch, items: [{id, item, count}], totalPrice, deliveryFee, addressId }
-                    const orderPayload: any = {
-                        userId: user?._id || '', // Ensure string fallback
-                        branch: allocatedBranch._id,
-                        items: items.map(i => ({
-                            id: i.product._id,
-                            item: i.product.name,
-                            count: i.quantity
-                        })),
-                        addressId: addressId,
-                        totalPrice: grandTotal,
-                        deliveryFee: finalDeliveryCharge,
-                        // Extra fields for frontend usage or if backend updates later
-                        paymentMethod: 'online' as const
-                    };
-
-                    const orderResponse = await orderService.createOrder(orderPayload);
-                    createdOrderId = orderResponse.order._id;
-
-                    // 2. Create Payment Order (Razorpay)
-                    const paymentOrderResponse = await orderService.createPaymentOrder({
-                        amount: grandTotal,
-                        currency: 'INR',
-                        receipt: `order_${createdOrderId}`,
-                        orderType: 'order'
-                    });
-
-                    // 3. Open Razorpay
-                    const options = {
-                        description: 'Order Payment',
-                        image: 'https://lushandpures.com/assets/images/favicon.png',
-                        currency: 'INR',
-                        key: RAZORPAY_KEY_ID,
-                        amount: paymentOrderResponse.amount,
-                        name: 'Lush & Pure',
-                        order_id: paymentOrderResponse.id,
-                        prefill: {
-                            email: user?.email || 'user@example.com',
-                            contact: user?.phone || '9999999999',
-                            name: user?.name || 'User Name'
-                        },
-                        theme: { color: colors.primary }
-                    };
-
-                    RazorpayCheckout.open(options).then(async (data: any) => {
-                        // 4. Verify Payment
-                        await orderService.verifyPayment({
-                            order_id: data.razorpay_order_id,
-                            payment_id: data.razorpay_payment_id,
-                            signature: data.razorpay_signature,
-                            appOrderId: createdOrderId!, // Pass internal Order ID so backend can update it
-                            amount: grandTotal
-                        });
-
-                        clearRegularCart();
-                        Alert.alert("Order Placed", "Your yummy order is on the way!", [
-                            { text: "Track Order", onPress: () => navigation.navigate('OrderTracking', { orderId: createdOrderId }) },
-                            { text: "Home", onPress: () => navigation.navigate('Home') }
-                        ]);
-                    }).catch(async (error: any) => {
-                        logger.error('Payment Error', error);
-                        // Cleanup pending order when payment cancelled or failed
-                        if (createdOrderId) {
-                            try {
-                                await orderService.deletePendingOrder(createdOrderId);
-                                logger.log('Cleaned up pending order:', createdOrderId);
-                            } catch (cleanupErr) {
-                                logger.error('Failed to cleanup order:', cleanupErr);
-                            }
-                        }
-                        Alert.alert("Payment Cancelled", "Your payment was not completed. The order has been cancelled.");
-                    });
-                } catch (orderError: any) {
-                    logger.error('Order creation error:', orderError);
-                    // If order was created but payment order failed, clean up
                     if (createdOrderId) {
                         try {
                             await orderService.deletePendingOrder(createdOrderId);
-                            logger.log('Cleaned up pending order after payment creation failure:', createdOrderId);
+                            logger.log('Cleaned up pending order:', createdOrderId);
                         } catch (cleanupErr) {
                             logger.error('Failed to cleanup order:', cleanupErr);
                         }
                     }
-                    Alert.alert("Error", orderError.message || "Failed to process order. Please try again.");
+                    Alert.alert("Payment Cancelled", "Your payment was not completed. The order has been cancelled.");
+                });
+            } catch (orderError: any) {
+                logger.error('Order creation error:', orderError);
+                const errorMessage = orderError.response?.data?.message || orderError.response?.data?.error || orderError.message || "Failed to process order. Please try again.";
+                Alert.alert("Order Error", errorMessage);
+                if (createdOrderId) {
+                    try {
+                        await orderService.deletePendingOrder(createdOrderId);
+                    } catch (cleanupErr) {
+                        logger.error('Failed to cleanup order:', cleanupErr);
+                    }
                 }
             }
         } catch (error: any) {
             logger.error('Order placement error:', error);
-            Alert.alert("Error", error.message || "Failed to place order. Please try again.");
+            const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || "Failed to process order. Please try again.";
+            Alert.alert("Order Error", errorMessage);
         } finally {
             setPlacingOrder(false);
         }
@@ -372,163 +467,170 @@ export const CheckoutScreen = () => {
     // Handle COD Payment
     const handleCodPayment = async () => {
         if (!address || !allocatedBranch) return;
+
+        // Final stock check before order
+        const isStockAvailable = await validateStock(true);
+        if (!isStockAvailable) return;
+
         setPlacingOrder(true);
 
         try {
-            if (isSubscription) {
-                // 1. Prepare and Create Subscription (same as online flow)
-                const productsPayload = finalSubItems.map((item: any) => ({
-                    productId: item.product._id,
-                    selectedQuantity: item.product.formattedQuantity || (typeof item.product.quantity === 'object'
-                        ? `${item.product.quantity.value}${item.product.quantity.unit}`
-                        : `${item.product.quantity}`),
-                    animalType: item.product.animalTypes?.[0]?.type || 'cow',
-                    deliveryFrequency: item.frequency,
-                    count: item.quantity || 1,
-                    unitPrice: item.product.discountPrice || item.product.price,
-                    monthlyPrice: (item.product.discountPrice || item.product.price) * (item.quantity || 1) * getDeliveriesCount(item.frequency)
-                }));
+            // Normal Order COD Flow
+            const orderPayload: any = {
+                userId: user?._id || '',
+                branchId: allocatedBranch._id,
+                items: items.map(i => ({
+                    inventoryId: i.product.inventoryId || i.product._id,
+                    quantity: i.quantity
+                })),
+                addressId: selectedAddressId,
+                totalPrice: grandTotal,
+                deliveryFee: finalDeliveryCharge,
+                sgst: taxRates.sgst,
+                cgst: taxRates.cgst,
+                couponCode: appliedCoupon?.code || null,
+                couponDiscount: couponDiscount || 0,
+                paymentMethod: 'cod' as const
+            };
 
-                const subscriptionPayload = {
-                    customerId: user?._id || '',
-                    products: productsPayload,
-                    slot,
-                    startDate: startDate.toISOString(),
-                    endDate: new Date(startDate.getTime() + (30 - 1) * 24 * 60 * 60 * 1000).toISOString(), // 29 days after start = 30 days inclusive
-                    addressId: addressId,
-                    branchId: allocatedBranch._id,
-                    branchName: allocatedBranch.name
-                };
+            const orderResponse = await orderService.createOrder(orderPayload);
+            const createdOrderId = orderResponse.order._id;
 
-                const subResponse = await orderService.createEnhancedSubscription(subscriptionPayload);
-                const subscriptionId = subResponse.subscription._id;
+            // Mark as COD
+            await orderService.createCodOrder(createdOrderId);
 
-                // 2. Mark as COD
-                await orderService.createCodSubscription(subscriptionId);
-
-                Alert.alert("Success", "Subscription activated with Cash on Delivery!", [
-                    {
-                        text: "OK", onPress: () => {
-                            useHomeStore.getState().fetchHomeData();
-                            clearSubscriptionCart();
-                            navigation.navigate('Home');
-                        }
-                    }
-                ]);
-            } else {
-                // Normal Order COD Flow
-                const orderPayload: any = {
-                    userId: user?._id || '',
-                    branch: allocatedBranch._id,
-                    items: items.map(i => ({
-                        id: i.product._id,
-                        item: i.product.name,
-                        count: i.quantity
-                    })),
-                    addressId: addressId,
-                    totalPrice: grandTotal,
-                    deliveryFee: finalDeliveryCharge,
-                    paymentMethod: 'cod' as const
-                };
-
-                const orderResponse = await orderService.createOrder(orderPayload);
-                const createdOrderId = orderResponse.order._id;
-
-                // Mark as COD
-                await orderService.createCodOrder(createdOrderId);
-
-                clearRegularCart();
-                Alert.alert("Order Placed", "Your order is confirmed! Pay on delivery.", [
-                    { text: "Track Order", onPress: () => navigation.navigate('OrderTracking', { orderId: createdOrderId }) },
-                    { text: "Home", onPress: () => navigation.navigate('Home') }
-                ]);
-            }
+            notifyOrderPlaced(createdOrderId);
+            clearCart();
+            Alert.alert("Order Placed", "Your order is confirmed! Pay on delivery.", [
+                { text: "Track Order", onPress: () => navigation.navigate('OrderTracking', { orderId: createdOrderId, from: 'checkout' }) },
+                { text: "Home", onPress: () => navigation.navigate('Home') }
+            ]);
         } catch (error: any) {
             logger.error('COD order error:', error);
-            Alert.alert("Error", error.message || "Failed to place COD order. Please try again.");
+            const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || "Failed to place COD order. Please try again.";
+            Alert.alert("Order Error", errorMessage);
         } finally {
             setPlacingOrder(false);
         }
     };
 
-    const renderItem = ({ item }: { item: any }) => (
-        <View style={styles.itemRow}>
-            {/* Image placeholder or real image if available */}
-            <View style={styles.itemImagePlaceholder}>
-                {item.product.images?.[0] ? (
-                    <Image source={{ uri: item.product.images[0] }} style={{ width: '100%', height: '100%', borderRadius: 8 }} resizeMode="cover" />
-                ) : (
-                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                        <Path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                    </Svg>
-                )}
-            </View>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-                <MonoText size="s" weight="bold" numberOfLines={1}>{item.product.name}</MonoText>
+    const renderItem = ({ item }: { item: any }) => {
+        const inventoryId = item.product.inventoryId || item.product._id;
+        const stockError = stockErrors[inventoryId];
 
-                {/* Variant / Quantity Info */}
-                <MonoText size="xs" color={colors.textLight}>
-                    {item.quantity} x {typeof item.product.quantity === 'object' ? item.product.quantity.value : item.product.quantity} {typeof item.product.quantity === 'object' ? item.product.quantity.unit : item.product.unit}
-                </MonoText>
+        const handleDecrease = () => {
+            if (item.quantity <= 0) {
+                showToast('Product quantity is already at minimum!');
+                return;
+            }
+            if (item.quantity === 1) {
+                setItemToRemove(item);
+                setRemoveItemModalVisible(true);
+            } else {
+                removeFromCart(item.product._id);
+            }
+        };
 
-                {/* Subscription Plan Info explicitly in Product Card */}
-                {isSubscription && (
-                    <View style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center' }}>
-                        <View style={{ backgroundColor: '#E0F2FE', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginRight: 6 }}>
-                            <MonoText size="xs" color="#0369A1" weight="bold">
-                                {item.frequency ? item.frequency.charAt(0).toUpperCase() + item.frequency.slice(1) : 'Daily'}
+        return (
+            <View style={[styles.itemRow, stockError && { borderColor: colors.error, borderWidth: 1, borderRadius: 12, padding: 8, backgroundColor: colors.error + '05' }]}>
+                {/* Image */}
+                <View style={styles.itemImagePlaceholder}>
+                    {item.product.images?.[0] ? (
+                        <Image source={{ uri: item.product.images[0] }} style={{ width: '100%', height: '100%', borderRadius: 8 }} resizeMode="cover" />
+                    ) : (
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                            <Path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                        </Svg>
+                    )}
+                </View>
+
+                {/* Info */}
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                    <MonoText size="s" weight="bold" numberOfLines={1}>{item.product.name}</MonoText>
+                    <MonoText size="xs" color={colors.textLight}>
+                        {typeof item.product.quantity === 'object'
+                            ? `${item.product.quantity.value} ${item.product.quantity.unit}`
+                            : item.product.unit || 'Nos'}
+                    </MonoText>
+
+                    {/* Price moved here - below quality/variant */}
+                    <View style={{ marginTop: 4 }}>
+                        <MonoText size="s" weight="bold">
+                            ₹{(item.product.discountPrice ?? item.product.price ?? 0) * item.quantity}
+                        </MonoText>
+                        {(() => {
+                            const mrp = item.product.price || 0;
+                            const sp = item.product.discountPrice ?? item.product.price ?? 0;
+                            if (mrp > sp) {
+                                return (
+                                    <MonoText size="xs" color={colors.textLight} style={{ textDecorationLine: 'line-through' }}>
+                                        ₹{mrp * item.quantity}
+                                    </MonoText>
+                                );
+                            }
+                            return null;
+                        })()}
+                    </View>
+
+                    {/* Stock Error Message */}
+                    {stockError && (
+                        <View style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center' }}>
+                            <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.error} strokeWidth="2">
+                                <Circle cx="12" cy="12" r="10" />
+                                <Line x1="12" y1="8" x2="12" y2="12" />
+                                <Line x1="12" y1="16" x2="12.01" y2="16" />
+                            </Svg>
+                            <MonoText size="xs" color={colors.error} weight="bold" style={{ marginLeft: 4 }}>
+                                {stockError.message}
                             </MonoText>
                         </View>
-                        <MonoText size="xs" color={colors.textLight}>
-                            {getDeliveriesCount(item.frequency)} Deliveries / Month
-                        </MonoText>
-                    </View>
-                )}
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-                <MonoText size="s" weight="bold">
-                    ₹{(item.product.discountPrice || item.product.price) * item.quantity}
-                    {isSubscription && <MonoText size="xs" color={colors.textLight}> / unit</MonoText>}
-                </MonoText>
-                {(item.product.discountPrice && item.product.price > item.product.discountPrice) && (
-                    <MonoText size="xs" color={colors.textLight} style={{ textDecorationLine: 'line-through' }}>
-                        ₹{item.product.price * item.quantity}
-                    </MonoText>
-                )}
-            </View>
-        </View>
-    );
+                    )}
+                </View>
 
-    const onChangeDate = (event: any, selectedDate?: Date) => {
-        const currentDate = selectedDate || startDate;
-        setShowDatePicker(Platform.OS === 'ios');
-        setStartDate(currentDate);
-        if (Platform.OS === 'android') setShowDatePicker(false);
+                {/* Right Column: Counter only */}
+                <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                    {/* Quantity Controls - White background style */}
+                    <View style={styles.checkoutQtyContainer}>
+                        <TouchableOpacity
+                            onPress={handleDecrease}
+                            style={styles.checkoutQtyBtn}
+                        >
+                            <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3">
+                                <Line x1="5" y1="12" x2="19" y2="12" />
+                            </Svg>
+                        </TouchableOpacity>
+
+                        <View style={styles.checkoutQtyValue}>
+                            <MonoText size="s" weight="bold">{item.quantity}</MonoText>
+                        </View>
+
+                        <TouchableOpacity
+                            onPress={() => {
+                                const success = addToCart(item.product);
+                                if (!success) {
+                                    const currentQuantity = getItemQuantity(item.product._id);
+                                    if (currentQuantity >= (item.product.stock || 0)) {
+                                        showToast('Maximum stock limit reached!');
+                                    } else {
+                                        showToast('Product is out of stock!');
+                                    }
+                                }
+                            }}
+                            style={styles.checkoutQtyBtn}
+                        >
+                            <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3">
+                                <Line x1="12" y1="5" x2="12" y2="19" />
+                                <Line x1="5" y1="12" x2="19" y2="12" />
+                            </Svg>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        );
     };
 
     if (loading) {
-        return (
-            <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-                <View style={{ alignItems: 'center' }}>
-                    <View style={{
-                        width: 80,
-                        height: 80,
-                        borderRadius: 40,
-                        backgroundColor: `${colors.primary}15`,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                    }}>
-                        <Svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
-                            <Path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-                            <Circle cx="12" cy="9" r="3" />
-                        </Svg>
-                    </View>
-                    <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />
-                    <MonoText size="m" weight="bold" style={{ marginTop: 16 }}>Preparing Checkout</MonoText>
-                    <MonoText size="s" color={colors.textLight} style={{ marginTop: 4 }}>Getting everything ready for you...</MonoText>
-                </View>
-            </SafeAreaView>
-        );
+        return <CheckoutSkeleton />;
     }
 
     if (!serviceAvailable) {
@@ -553,49 +655,61 @@ export const CheckoutScreen = () => {
     // Out of range check (> 30km) - Full Screen Notice
     if (isOutOfRange) {
         return (
-            <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: spacing.xl }]}>
-                {/* Warning Icon */}
-                <View style={styles.outOfRangeIconContainer}>
-                    <Svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2">
-                        <Path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" fill="#DC2626" stroke="#DC2626" />
-                        <Line x1="12" y1="9" x2="12" y2="13" stroke="#FFFFFF" strokeWidth="2" />
-                        <Line x1="12" y1="17" x2="12.01" y2="17" stroke="#FFFFFF" strokeWidth="2" />
-                    </Svg>
-                </View>
+            <View style={styles.container}>
+                <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: spacing.xl }]}>
+                    {/* Warning Icon */}
+                    <View style={styles.outOfRangeIconContainer}>
+                        <Svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2">
+                            <Path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" fill="#DC2626" stroke="#DC2626" />
+                            <Line x1="12" y1="9" x2="12" y2="13" stroke="#FFFFFF" strokeWidth="2" />
+                            <Line x1="12" y1="17" x2="12.01" y2="17" stroke="#FFFFFF" strokeWidth="2" />
+                        </Svg>
+                    </View>
 
-                <MonoText size="xl" weight="bold" style={{ textAlign: 'center', marginBottom: 8, marginTop: 20 }}>
-                    Service Not Available
-                </MonoText>
-                <MonoText size="m" color={colors.textLight} style={{ textAlign: 'center', marginBottom: 8 }}>
-                    Sorry, we're not available in your area yet!
-                </MonoText>
-                <View style={styles.distanceBadge}>
-                    <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.error} strokeWidth="2">
-                        <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                        <Circle cx="12" cy="10" r="3" />
-                    </Svg>
-                    <MonoText size="s" weight="bold" color={colors.error} style={{ marginLeft: 6 }}>
-                        {distanceKm} km away from nearest branch
+                    <MonoText size="xl" weight="bold" style={{ textAlign: 'center', marginBottom: 8, marginTop: 20 }}>
+                        Service Not Available
                     </MonoText>
-                </View>
-                <MonoText color={colors.textLight} style={{ textAlign: 'center', marginBottom: 32, marginTop: 16, paddingHorizontal: 20 }}>
-                    We currently deliver only within 30km of our branches. We'll be expanding soon! Try changing your delivery address or check back later.
-                </MonoText>
+                    <MonoText size="m" color={colors.textLight} style={{ textAlign: 'center', marginBottom: 8 }}>
+                        Sorry, we're not available in your area yet!
+                    </MonoText>
+                    <View style={styles.distanceBadge}>
+                        <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.error} strokeWidth="2">
+                            <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                            <Circle cx="12" cy="10" r="3" />
+                        </Svg>
+                        <MonoText size="s" weight="bold" color={colors.error} style={{ marginLeft: 6 }}>
+                            {distanceKm} km away from nearest branch
+                        </MonoText>
+                    </View>
+                    <MonoText color={colors.textLight} style={{ textAlign: 'center', marginBottom: 32, marginTop: 16, paddingHorizontal: 20 }}>
+                        We currently deliver only within {allocatedBranch?.deliveryRadiusKm || 30}km of our branches. We'll be expanding soon! Try changing your delivery address or check back later.
+                    </MonoText>
 
-                {/* Action Buttons */}
-                <TouchableOpacity
-                    style={styles.outOfRangePrimaryBtn}
-                    onPress={() => navigation.navigate('AddressSelection', { mode: mode || 'cart' })}
-                >
-                    <MonoText weight="bold" color={colors.white}>Change Delivery Address</MonoText>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={styles.outOfRangeSecondaryBtn}
-                    onPress={() => navigation.navigate('Home')}
-                >
-                    <MonoText weight="bold" color={colors.text}>Go Back Home</MonoText>
-                </TouchableOpacity>
-            </SafeAreaView>
+                    {/* Action Buttons */}
+                    <TouchableOpacity
+                        style={styles.outOfRangePrimaryBtn}
+                        onPress={() => setAddressModalVisible(true)}
+                    >
+                        <MonoText weight="bold" color={colors.white}>Change Delivery Address</MonoText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.outOfRangeSecondaryBtn}
+                        onPress={() => navigation.navigate('Home')}
+                    >
+                        <MonoText weight="bold" color={colors.text}>Go Back Home</MonoText>
+                    </TouchableOpacity>
+                </SafeAreaView>
+
+                {/* Address Selection Modal */}
+                <CheckoutAddressModal
+                    visible={addressModalVisible}
+                    onSelectAddress={handleAddressSelect}
+                    onBackWithoutSelection={handleBackWithoutSelection}
+                    onCancel={handleCancelModal}
+                    onAddNewAddress={handleAddNewAddress}
+                    selectedAddressId={selectedAddressId}
+                />
+            </View>
         );
     }
 
@@ -639,121 +753,7 @@ export const CheckoutScreen = () => {
 
             <ScrollView contentContainerStyle={styles.content}>
 
-                {/* 1. Delivery Address Card */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                            <Circle cx="12" cy="10" r="3" />
-                        </Svg>
-                        <MonoText weight="bold" style={{ marginLeft: 8 }}>Delivery Address</MonoText>
-                    </View>
-                    <MonoText size="s" weight="bold">{address?.addressLine1}</MonoText>
-                    {!!address?.addressLine2 && <MonoText size="s">{address.addressLine2}</MonoText>}
-                    <MonoText size="s" color={colors.textLight}>{address?.city}, {address?.zipCode}</MonoText>
-                </View>
-
-                {/* 2. Allocated Branch Card */}
-                <View style={styles.mapCard}>
-                    <View style={styles.mapContainer}>
-                        {address && address.latitude && address.longitude && allocatedBranch && (
-                            <MapView
-                                provider={PROVIDER_DEFAULT}
-                                style={StyleSheet.absoluteFill}
-                                initialRegion={{
-                                    latitude: (address.latitude + allocatedBranch.location.latitude) / 2,
-                                    longitude: (address.longitude + allocatedBranch.location.longitude) / 2,
-                                    latitudeDelta: Math.abs(address.latitude - allocatedBranch.location.latitude) * 1.5,
-                                    longitudeDelta: Math.abs(address.longitude - allocatedBranch.location.longitude) * 1.5,
-                                }}
-                                scrollEnabled={false}
-                                zoomEnabled={false}
-                            >
-                                <Marker coordinate={{ latitude: address.latitude, longitude: address.longitude }}>
-                                    <View style={styles.markerMyLoc} />
-                                </Marker>
-                                <Marker coordinate={{ latitude: allocatedBranch.location.latitude, longitude: allocatedBranch.location.longitude }}>
-                                    <View style={styles.markerStore} />
-                                </Marker>
-                                <Polyline
-                                    coordinates={[
-                                        { latitude: address.latitude, longitude: address.longitude },
-                                        { latitude: allocatedBranch.location.latitude, longitude: allocatedBranch.location.longitude }
-                                    ]}
-                                    strokeColor={colors.primary}
-                                    strokeWidth={3}
-                                    lineDashPattern={[5, 5]}
-                                />
-                            </MapView>
-                        )}
-                    </View>
-                    <View style={styles.branchInfo}>
-                        <View>
-                            <MonoText size="s" weight="bold" color={colors.text}>{allocatedBranch?.name || "Allocated Branch"}</MonoText>
-                            <MonoText size="xs" color={colors.textLight}>{distanceKm} km away</MonoText>
-                        </View>
-                        <View style={{ backgroundColor: '#FEFCE8', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
-                            <MonoText size="xs" color="#854D0E" weight="bold">
-                                {isSubscription
-                                    ? "~2 hrs delivery"
-                                    : `~${Math.ceil(distanceKm * 5 + 15)} mins`
-                                }
-                            </MonoText>
-                        </View>
-                    </View>
-                </View>
-
-                {/* Important Notice */}
-                <View style={styles.noticeCard}>
-                    <MonoText size="xs" color="#854D0E" style={{ lineHeight: 18 }}>
-                        {isSubscription
-                            ? "NOTE: A delivery partner will be assigned within 2 hours of purchase. You can reschedule slots and dates anytime from your calendar."
-                            : `NOTE: A delivery partner will be assigned shortly.Your order will reach you in approximately ${Math.ceil(distanceKm * 5 + 15)} minutes.`
-                        }
-                    </MonoText>
-                </View>
-
-                {/* 3. Subscription Slots (if applicable) */}
-                {isSubscription && (
-                    <View style={styles.section}>
-                        <MonoText size="m" weight="bold" style={{ marginBottom: 12 }}>Schedule Delivery</MonoText>
-                        <View style={styles.slotRow}>
-                            <TouchableOpacity style={[styles.slotBtn, slot === 'morning' && styles.slotBtnActive]} onPress={() => setSlot('morning')}>
-                                <MonoText size="s" weight="bold" color={slot === 'morning' ? colors.primary : colors.textLight}>Morning</MonoText>
-                                <MonoText size="xs" color={slot === 'morning' ? colors.primary : colors.textLight}>8 AM - 10 AM</MonoText>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={[styles.slotBtn, slot === 'evening' && styles.slotBtnActive]} onPress={() => setSlot('evening')}>
-                                <MonoText size="s" weight="bold" color={slot === 'evening' ? colors.primary : colors.textLight}>Evening</MonoText>
-                                <MonoText size="xs" color={slot === 'evening' ? colors.primary : colors.textLight}>6 PM - 8 PM</MonoText>
-                            </TouchableOpacity>
-                        </View>
-                        <MonoText size="s" weight="bold" style={{ marginBottom: 8 }}>Start Date</MonoText>
-                        <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <Rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                                <Line x1="16" y1="2" x2="16" y2="6" />
-                                <Line x1="8" y1="2" x2="8" y2="6" />
-                                <Line x1="3" y1="10" x2="21" y2="10" />
-                            </Svg>
-                            <MonoText>Start Delivery From: <MonoText weight="bold">{startDate.toDateString()}</MonoText></MonoText>
-                        </TouchableOpacity>
-                        {showDatePicker && (
-                            <DateTimePicker
-                                value={startDate}
-                                mode="date"
-                                display="default"
-                                onChange={onChangeDate}
-                                minimumDate={(() => {
-                                    const d = new Date();
-                                    d.setDate(d.getDate() + 1);
-                                    return d;
-                                })()}
-                            />
-                        )}
-                    </View>
-                )}
-
-                {/* 4. Product Details */}
+                {/* 1. Product Details (Order Items) - TOP */}
                 <View style={styles.section}>
                     <MonoText size="m" weight="bold" style={{ marginBottom: 16 }}>Order Items</MonoText>
                     <FlatList
@@ -762,126 +762,495 @@ export const CheckoutScreen = () => {
                         keyExtractor={(item: any, index: number) => item.product._id + index}
                         scrollEnabled={false}
                     />
-                    {!isSubscription && (
-                        <TouchableOpacity style={styles.addMoreRow} onPress={() => navigation.navigate('Home')}>
-                            <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <Line x1="12" y1="5" x2="12" y2="19" />
-                                <Line x1="5" y1="12" x2="19" y2="12" />
-                            </Svg>
-                            <MonoText size="s" weight="bold" color={colors.primary}>Add more products</MonoText>
-                        </TouchableOpacity>
-                    )}
                 </View>
 
-                {/* 5. Bill Summary */}
-                <View style={styles.section}>
-                    <MonoText size="m" weight="bold" style={{ marginBottom: 12 }}>Payment Summary</MonoText>
-
-                    {/* Item Total */}
-                    <View style={styles.billRow}>
-                        <View>
-                            <MonoText color={colors.textLight}>{isSubscription ? 'Monthly Total' : 'Item Total'}</MonoText>
-                            {isSubscription && (
-                                <MonoText size="xs" color={colors.textLight} style={{ marginTop: 2 }}>
-                                    (Total for {finalSubItems.length} subscription {finalSubItems.length > 1 ? 'items' : 'item'})
-                                </MonoText>
-                            )}
+                {/* 2. Before you checkout Suggestions */}
+                {suggestionProducts.length > 0 && (
+                    <View style={[styles.section, { backgroundColor: 'transparent', paddingHorizontal: 0, marginTop: 10, marginBottom: 20 }]}>
+                        <View style={{ marginBottom: 16 }}>
+                            <MonoText size="m" weight="bold">Before you checkout</MonoText>
+                            <MonoText size="xs" color={colors.textLight} style={{ marginTop: 2 }}>You might need these fresh items too</MonoText>
                         </View>
-                        <MonoText weight="bold">₹{isSubscription ? subMonthlyTotal : cartTotal}</MonoText>
-                    </View>
-
-                    {savings > 0 && (
-                        <View style={styles.billRow}>
-                            <MonoText color={colors.success}>Total Savings</MonoText>
-                            <MonoText color={colors.success} weight="bold">- ₹{savings}</MonoText>
-                        </View>
-                    )}
-
-                    <View style={styles.billRow}>
-                        <MonoText color={colors.textLight}>Delivery Charges</MonoText>
-                        <MonoText weight="bold" color={isSubscription ? colors.success : colors.black}>
-                            {finalDeliveryCharge === 0 ? 'FREE' : `₹${finalDeliveryCharge} `}
-                        </MonoText>
-                    </View>
-
-                    <View style={styles.divider} />
-
-                    <View style={styles.billRow}>
-                        <MonoText size="l" weight="bold">To Pay</MonoText>
-                        <MonoText size="l" weight="bold" color={colors.primary}>₹{grandTotal}</MonoText>
-                    </View>
-                </View>
-
-                <View style={{ height: 100 }} />
-            </ScrollView>
-
-            {/* Footer */}
-            <View style={styles.footer}>
-                {/* Out of Range Warning - Enhanced visibility */}
-                {isOutOfRange && (
-                    <View style={styles.outOfRangeWarning}>
-                        <View style={styles.warningIconContainer}>
-                            <Svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2">
-                                <Path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" fill="#DC2626" stroke="#DC2626" />
-                                <Line x1="12" y1="9" x2="12" y2="13" stroke="#FFFFFF" />
-                                <Line x1="12" y1="17" x2="12.01" y2="17" stroke="#FFFFFF" />
-                            </Svg>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <MonoText size="m" weight="bold" color="#DC2626">
-                                Service Not Available
-                            </MonoText>
-                            <MonoText size="s" color="#7F1D1D" style={{ marginTop: 2 }}>
-                                Sorry, we're not available in your area yet ({distanceKm}km away). We'll be coming soon!
-                            </MonoText>
+                        <FlatList
+                            horizontal
+                            data={suggestionProducts}
+                            showsHorizontalScrollIndicator={false}
+                            keyExtractor={(p) => p._id}
+                            contentContainerStyle={{ paddingRight: spacing.l }}
+                            ItemSeparatorComponent={() => <View style={{ width: 14 }} />}
+                            renderItem={({ item: p }) => {
+                                const variant = (p as any).variants?.[0] || p.variant;
+                                const cartItemId = variant?._id || variant?.inventoryId || p._id;
+                                return (
+                                    <ProductGridCard
+                                        product={p}
+                                        variant={variant}
+                                        quantity={getItemQuantity(cartItemId)}
+                                        width={160}
+                                        onPress={() => handleProductPress(p, variant?.inventoryId)}
+                                        onAddToCart={handleAddToCartFromSuggestions}
+                                        onRemoveFromCart={removeFromCart}
+                                    />
+                                );
+                            }}
+                        />
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                            <View style={{ flex: 1, height: 1.5, backgroundColor: colors.border, opacity: 0.6 }} />
                             <TouchableOpacity
-                                style={styles.changeAddressBtn}
-                                onPress={() => navigation.navigate('AddressSelection', { mode: mode || 'cart' })}
+                                style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 16 }}
+                                onPress={() => navigation.navigate('Home')}
                             >
-                                <MonoText size="xs" weight="bold" color="#DC2626">
-                                    Change Delivery Address →
+                                <MonoText size="s" weight="bold" color={colors.primary} style={{ textDecorationLine: 'underline' }}>
+                                    Something still left? Add now
                                 </MonoText>
+                                <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2.5" style={{ marginLeft: 4 }}>
+                                    <Path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                                </Svg>
                             </TouchableOpacity>
                         </View>
                     </View>
                 )}
-                {/* Payment Buttons */}
-                <View style={styles.paymentButtonsRow}>
-                    {/* COD Button */}
+
+                {/* 3. Apply Coupon Section */}
+                <View style={[styles.section, { marginBottom: 16 }]}>
                     <TouchableOpacity
-                        style={[
-                            styles.codBtn,
-                            (placingOrder || isOutOfRange) && styles.payBtnDisabled
-                        ]}
-                        onPress={handleCodPayment}
-                        disabled={placingOrder || isOutOfRange}
+                        style={styles.applyCouponBtnSimple}
+                        onPress={() => setCouponModalVisible(true)}
                     >
-                        <MonoText weight="bold" color={colors.text} size="s">
-                            {placingOrder ? 'Processing...' : 'Pay on Delivery'}
-                        </MonoText>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <View style={styles.couponIconContainer}>
+                                <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2.5">
+                                    <Path d="M15 5l-1.41 1.41L15 7.83 17.17 10H13V12h4.17L15 14.17l1.41 1.41L19 12l-4-4z" />
+                                    <Path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM5 19V5h14v14H5z" />
+                                </Svg>
+                            </View>
+                            <View style={{ marginLeft: 12 }}>
+                                <MonoText size="s" weight="bold">Apply Coupon</MonoText>
+                                <MonoText size="xs" color={colors.textLight}>Save more on your order</MonoText>
+                            </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            {availableCouponsCount > 0 && (
+                                <View style={styles.couponCountBadgeSimple}>
+                                    <MonoText size="xs" weight="bold" color={colors.primary}>{availableCouponsCount} Offers</MonoText>
+                                </View>
+                            )}
+                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                                <Path d="M9 18l6-6-6-6" />
+                            </Svg>
+                        </View>
                     </TouchableOpacity>
 
-                    {/* Online Pay Button */}
+                    {appliedCoupon && (
+                        <View style={styles.appliedCouponRow}>
+                            <View style={styles.couponCodeBadgeSimple}>
+                                <MonoText size="xs" weight="bold" color={colors.success}>{appliedCoupon.code}</MonoText>
+                            </View>
+                            <MonoText size="s" color={colors.success} style={{ flex: 1, marginLeft: 10 }}>
+                                Applied! Saving ₹{couponDiscount.toFixed(2)}
+                            </MonoText>
+                            <TouchableOpacity onPress={handleRemoveCoupon}>
+                                <MonoText size="xs" weight="bold" color={colors.error}>REMOVE</MonoText>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+                </View>
+
+                {/* 4. Bill Details */}
+                <View style={styles.section}>
+                    <MonoText size="m" weight="bold" style={{ marginBottom: 16 }}>Bill Details</MonoText>
+
+                    {/* Item Total (MRP) */}
+                    <View style={styles.billRow}>
+                        <MonoText color={colors.textLight}>Item Total (MRP)</MonoText>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            {productDiscount > 0 && (
+                                <MonoText size="s" color={colors.textLight} style={{ textDecorationLine: 'line-through', marginRight: 8 }}>
+                                    ₹{mrpTotal.toFixed(2)}
+                                </MonoText>
+                            )}
+                            <MonoText weight="bold">₹{Number(baseTotal).toFixed(2)}</MonoText>
+                        </View>
+                    </View>
+
+                    {/* Product Discount */}
+                    {productDiscount > 0 && (
+                        <View style={styles.billRow}>
+                            <MonoText color={colors.success}>Product Discount</MonoText>
+                            <MonoText color={colors.success} weight="bold">- ₹{productDiscount.toFixed(2)}</MonoText>
+                        </View>
+                    )}
+
+                    {/* Coupon Discount */}
+                    {couponDiscount > 0 && appliedCoupon && (
+                        <View style={[styles.billRow, styles.couponRow]}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <MonoText color={colors.success}>Coupon</MonoText>
+                                <View style={styles.couponTag}>
+                                    <MonoText size="xs" color={colors.success} weight="bold">{appliedCoupon.code}</MonoText>
+                                </View>
+                            </View>
+                            <MonoText color={colors.success} weight="bold">- ₹{couponDiscount.toFixed(2)}</MonoText>
+                        </View>
+                    )}
+
+                    {/* Delivery Charges */}
+                    <View style={styles.billRow}>
+                        <MonoText color={colors.textLight}>Delivery Charges</MonoText>
+                        <MonoText weight="bold" color={finalDeliveryCharge === 0 ? colors.success : colors.black}>
+                            {finalDeliveryCharge === 0 ? 'FREE' : `₹${finalDeliveryCharge.toFixed(2)}`}
+                        </MonoText>
+                    </View>
+
+                    {/* Tax Breakdown */}
+                    {(taxRates.sgst > 0 || taxRates.cgst > 0) && (
+                        <>
+                            <View style={styles.billRow}>
+                                <MonoText color={colors.textLight}>SGST ({taxRates.sgst}%)</MonoText>
+                                <MonoText weight="bold">₹{sgstAmount.toFixed(2)}</MonoText>
+                            </View>
+                            <View style={styles.billRow}>
+                                <MonoText color={colors.textLight}>CGST ({taxRates.cgst}%)</MonoText>
+                                <MonoText weight="bold">₹{cgstAmount.toFixed(2)}</MonoText>
+                            </View>
+                        </>
+                    )}
+
+                    <View style={styles.divider} />
+
+                    {/* Total Savings Banner */}
+                    {totalDiscount > 0 && (
+                        <View style={styles.savingsBanner}>
+                            <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2">
+                                <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                            </Svg>
+                            <MonoText size="s" weight="bold" color="#16A34A" style={{ marginLeft: 8 }}>
+                                You're saving ₹{totalDiscount.toFixed(2)} on this order!
+                            </MonoText>
+                        </View>
+                    )}
+
+                    <View style={styles.billRow}>
+                        <MonoText size="l" weight="bold">To Pay</MonoText>
+                        <MonoText size="l" weight="bold" color={colors.primary}>₹{(grandTotal || 0).toFixed(2)}</MonoText>
+                    </View>
+                </View>
+
+                <View style={{ height: 160 }} />
+            </ScrollView>
+
+            {/* New Footer with Payment Selector */}
+            <View style={styles.newFooter}>
+                {/* Sticky Delivery Address Section */}
+                <View style={styles.stickyDeliveryContainer}>
+                    <View style={styles.deliveryIconCircle}>
+                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
+                            <Path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                            <Path d="M9 22V12h6v10" />
+                        </Svg>
+                    </View>
+                    <View style={styles.deliveryInfo}>
+                        {address ? (
+                            <>
+                                <MonoText size="s">Delivering to <MonoText weight="bold">{address.label || 'Other'}</MonoText></MonoText>
+                                <MonoText size="xs" color={colors.textLight} numberOfLines={1}>
+                                    {address.addressLine1}, {address.city}
+                                </MonoText>
+                            </>
+                        ) : (
+                            <MonoText size="s" color={colors.error} weight="bold">No delivery address selected</MonoText>
+                        )}
+                    </View>
+                    <TouchableOpacity onPress={() => setAddressModalVisible(true)}>
+                        <MonoText size="s" weight="bold" color={colors.primary}>{address ? 'Change' : 'Select'}</MonoText>
+                    </TouchableOpacity>
+                </View>
+
+                <View style={styles.footerDivider} />
+
+                <View style={styles.footerRow}>
+                    {/* Payment Method Selector */}
+                    <TouchableOpacity
+                        style={styles.paymentSelector}
+                        onPress={() => setPaymentModalVisible(true)}
+                    >
+                        <View style={styles.paymentText}>
+                            <MonoText size="xs" color={colors.textLight}>Pay Using</MonoText>
+                            <View style={styles.paymentMethodRow}>
+                                <MonoText size="s" weight="bold">
+                                    {paymentMethod === 'online' ? 'Online Payment' : 'Cash on Delivery'}
+                                </MonoText>
+                                <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2.5" style={{ marginLeft: 4 }}>
+                                    <Path d="M18 15l-6-6-6 6" />
+                                </Svg>
+                            </View>
+                        </View>
+                    </TouchableOpacity>
+
+                    {/* Pay Button */}
                     <TouchableOpacity
                         style={[
-                            styles.payBtn,
-                            { flex: 1.5 },
-                            (placingOrder || isOutOfRange) && styles.payBtnDisabled
+                            styles.newPayBtn,
+                            (placingOrder || isOutOfRange || !address || hasCriticalStockIssue) && styles.payBtnDisabled
                         ]}
-                        onPress={handlePlaceOrder}
-                        disabled={placingOrder || isOutOfRange}
-                    >
-                        <MonoText weight="bold" color={colors.white} size="m">
-                            {placingOrder
-                                ? 'Processing...'
-                                : isOutOfRange
-                                    ? '🚫 Not Available'
-                                    : `Pay ₹${grandTotal}`
+                        onPress={() => {
+                            if (paymentMethod === 'online') {
+                                handlePlaceOrder();
+                            } else {
+                                handleCodPayment();
                             }
-                        </MonoText>
+                        }}
+                        disabled={placingOrder || isOutOfRange || !address || hasCriticalStockIssue}
+                    >
+                        <View style={styles.payBtnContent}>
+                            <MonoText weight="bold" color={colors.white} size="m">
+                                ₹{(grandTotal || 0).toFixed(0)}
+                            </MonoText>
+                            <View style={styles.payBtnSeparator} />
+                            <View style={styles.payBtnAction}>
+                                <MonoText weight="bold" color={colors.white} size="m">
+                                    {placingOrder
+                                        ? 'Processing...'
+                                        : isOutOfRange
+                                            ? 'Not Available'
+                                            : hasCriticalStockIssue
+                                                ? 'Items Unavailable'
+                                                : 'Place Order'
+                                    }
+                                </MonoText>
+                                {!hasCriticalStockIssue && (
+                                    <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2.5" style={{ marginLeft: 8 }}>
+                                        <Path d="M5 12h14M12 5l7 7-7 7" />
+                                    </Svg>
+                                )}
+                            </View>
+                        </View>
                     </TouchableOpacity>
                 </View>
             </View>
+
+            {/* Payment Method Modal */}
+            <Modal
+                visible={paymentModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setPaymentModalVisible(false)}
+                statusBarTranslucent={true}
+            >
+                <TouchableOpacity
+                    style={[styles.modalOverlay, { paddingBottom: 0 }]}
+                    activeOpacity={1}
+                    onPress={() => setPaymentModalVisible(false)}
+                >
+                    <View style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 24) + 16 }]}>
+                        <View style={styles.modalHeader}>
+                            <MonoText size="l" weight="bold">Select Payment Method</MonoText>
+                            <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
+                                <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                                    <Line x1="18" y1="6" x2="6" y2="18" />
+                                    <Line x1="6" y1="6" x2="18" y2="18" />
+                                </Svg>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Online Payment Option */}
+                        <TouchableOpacity
+                            style={[
+                                styles.paymentOption,
+                                paymentMethod === 'online' && styles.paymentOptionSelected
+                            ]}
+                            onPress={() => {
+                                setPaymentMethod('online');
+                                setPaymentModalVisible(false);
+                            }}
+                        >
+                            <View style={styles.paymentOptionIcon}>
+                                <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
+                                    <Path d="M21 4H3a2 2 0 00-2 2v12a2 2 0 002 2h18a2 2 0 002-2V6a2 2 0 00-2-2zM1 10h22" />
+                                </Svg>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <MonoText weight="bold">Online Payment</MonoText>
+                                <MonoText size="xs" color={colors.textLight}>UPI, Cards, Net Banking</MonoText>
+                            </View>
+                            <View style={[styles.radioOuter, paymentMethod === 'online' && styles.radioOuterSelected]}>
+                                {paymentMethod === 'online' && <View style={styles.radioInner} />}
+                            </View>
+                        </TouchableOpacity>
+
+                        {/* COD Option */}
+                        <TouchableOpacity
+                            style={[
+                                styles.paymentOption,
+                                paymentMethod === 'cod' && styles.paymentOptionSelected
+                            ]}
+                            onPress={() => {
+                                setPaymentMethod('cod');
+                                setPaymentModalVisible(false);
+                            }}
+                        >
+                            <View style={styles.paymentOptionIcon}>
+                                <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.success} strokeWidth="2">
+                                    <Circle cx="12" cy="12" r="10" />
+                                    <Path d="M9 12l2 2 4-4" />
+                                </Svg>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <MonoText weight="bold">Cash on Delivery</MonoText>
+                                <MonoText size="xs" color={colors.textLight}>Pay when you receive</MonoText>
+                            </View>
+                            <View style={[styles.radioOuter, paymentMethod === 'cod' && styles.radioOuterSelected]}>
+                                {paymentMethod === 'cod' && <View style={styles.radioInner} />}
+                            </View>
+                        </TouchableOpacity>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
+
+            {/* Apply Coupon Modal */}
+            <ApplyCouponModal
+                visible={couponModalVisible}
+                onClose={() => setCouponModalVisible(false)}
+                onApply={handleApplyCoupon}
+                cartTotal={baseTotal}
+                branchId={allocatedBranch?._id}
+                userId={user?._id}
+            />
+
+            {/* Remove Item Confirmation Modal */}
+            <Modal
+                visible={removeItemModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setRemoveItemModalVisible(false)}
+                statusBarTranslucent={true}
+            >
+                <TouchableOpacity
+                    style={[styles.modalOverlay, { paddingBottom: 0 }]}
+                    activeOpacity={1}
+                    onPress={() => setRemoveItemModalVisible(false)}
+                >
+                    <View style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 24) + 16 }]}>
+                        <View style={styles.modalHeader}>
+                            <MonoText size="l" weight="bold">Remove Item</MonoText>
+                            <TouchableOpacity onPress={() => setRemoveItemModalVisible(false)}>
+                                <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                                    <Line x1="18" y1="6" x2="6" y2="18" />
+                                    <Line x1="6" y1="6" x2="18" y2="18" />
+                                </Svg>
+                            </TouchableOpacity>
+                        </View>
+
+                        {itemToRemove && (
+                            <View>
+                                <View style={styles.removeModalItemCard}>
+                                    <View style={styles.removeModalItemImage}>
+                                        {itemToRemove.product.images?.[0] ? (
+                                            <Image source={{ uri: itemToRemove.product.images[0] }} style={{ width: '100%', height: '100%', borderRadius: 12 }} resizeMode="cover" />
+                                        ) : (
+                                            <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                                                <Path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                                            </Svg>
+                                        )}
+                                    </View>
+                                    <View style={{ flex: 1, marginLeft: 16 }}>
+                                        <MonoText size="m" weight="bold">{itemToRemove.product.name}</MonoText>
+                                        <MonoText size="s" color={colors.textLight} style={{ marginVertical: 4 }}>
+                                            {typeof itemToRemove.product.quantity === 'object'
+                                                ? `${itemToRemove.product.quantity.value} ${itemToRemove.product.quantity.unit}`
+                                                : itemToRemove.product.unit || 'Nos'}
+                                        </MonoText>
+                                        <MonoText size="m" weight="bold">₹{itemToRemove.product.discountPrice ?? itemToRemove.product.price}</MonoText>
+                                    </View>
+                                    <View style={styles.checkoutQtyContainer}>
+                                        <TouchableOpacity
+                                            style={styles.checkoutQtyBtn}
+                                            onPress={() => {
+                                                if (getItemQuantity(itemToRemove.product._id) === 1) {
+                                                    removeFromCart(itemToRemove.product._id);
+                                                    setRemoveItemModalVisible(false);
+                                                    setItemToRemove(null);
+                                                } else {
+                                                    removeFromCart(itemToRemove.product._id);
+                                                }
+                                            }}
+                                        >
+                                            <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3">
+                                                <Line x1="5" y1="12" x2="19" y2="12" />
+                                            </Svg>
+                                        </TouchableOpacity>
+                                        <View style={styles.checkoutQtyValue}>
+                                            <MonoText size="s" weight="bold">{getItemQuantity(itemToRemove.product._id)}</MonoText>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.checkoutQtyBtn}
+                                            onPress={() => {
+                                                const success = addToCart(itemToRemove.product);
+                                                if (!success) {
+                                                    const currentQuantity = getItemQuantity(itemToRemove.product._id);
+                                                    if (currentQuantity >= (itemToRemove.product.stock || 0)) {
+                                                        showToast('Maximum stock limit reached!');
+                                                    } else {
+                                                        showToast('Product is out of stock!');
+                                                    }
+                                                }
+                                            }}
+                                        >
+                                            <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3">
+                                                <Line x1="12" y1="5" x2="12" y2="19" />
+                                                <Line x1="5" y1="12" x2="19" y2="12" />
+                                            </Svg>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+
+                                <View style={styles.removeModalActions}>
+                                    <TouchableOpacity
+                                        style={styles.cancelRemoveBtn}
+                                        onPress={() => setRemoveItemModalVisible(false)}
+                                    >
+                                        <MonoText weight="bold">Cancel</MonoText>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.confirmRemoveBtn}
+                                        onPress={() => {
+                                            deleteFromCart(itemToRemove.product._id);
+                                            setRemoveItemModalVisible(false);
+                                            setItemToRemove(null);
+                                        }}
+                                    >
+                                        <MonoText weight="bold" color={colors.white}>Remove</MonoText>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        )}
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
+            {selectedProduct && (
+                <ProductDetailsModal
+                    visible={detailsModalVisible}
+                    product={selectedProduct}
+                    initialVariantId={selectedVariantId || undefined}
+                    onClose={() => {
+                        setDetailsModalVisible(false);
+                        setSelectedProduct(null);
+                        setSelectedVariantId(null);
+                    }}
+                />
+            )}
+
+            {/* Address Selection Modal */}
+            <CheckoutAddressModal
+                visible={addressModalVisible}
+                onSelectAddress={handleAddressSelect}
+                onBackWithoutSelection={handleBackWithoutSelection}
+                onCancel={handleCancelModal}
+                onAddNewAddress={handleAddNewAddress}
+                selectedAddressId={selectedAddressId}
+            />
         </View>
     );
 };
@@ -914,15 +1283,21 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: 16,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        ...Platform.select({
+            ios: {
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.1,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
     },
     content: {
-        paddingTop: 110, // Space for header
-        paddingBottom: 120,
+        paddingTop: 140, // Increased space for header
+        paddingBottom: 100,
         paddingHorizontal: spacing.l,
     },
     mapCard: {
@@ -1030,6 +1405,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 12,
     },
+    noAddressPlaceholder: {
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        backgroundColor: '#FEF2F2',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#FECACA',
+    },
     itemRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1045,18 +1428,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    addMoreRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        marginTop: 16,
-        paddingVertical: 14,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderStyle: 'dashed',
-    },
     payBtn: {
         flex: 1,
         height: 56,
@@ -1064,11 +1435,17 @@ const styles = StyleSheet.create({
         borderRadius: 28, // More rounded pill shape?
         alignItems: 'center',
         justifyContent: 'center',
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 4,
+        ...Platform.select({
+            ios: {
+                shadowColor: colors.primary,
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.2,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 4,
+            },
+        }),
     },
     payBtnDisabled: {
         backgroundColor: '#9CA3AF',
@@ -1127,11 +1504,17 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 12,
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.25,
-        shadowRadius: 8,
-        elevation: 4,
+        ...Platform.select({
+            ios: {
+                shadowColor: colors.primary,
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.25,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 4,
+            },
+        }),
     },
     outOfRangeSecondaryBtn: {
         width: '100%',
@@ -1166,10 +1549,376 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderWidth: 1,
         borderColor: 'rgba(0, 0, 0, 0.1)',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
-    }
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.05,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 2,
+            },
+        }),
+    },
+    quantityControls: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
+        backgroundColor: `${colors.primary}10`,
+        borderRadius: 8,
+        alignSelf: 'flex-start',
+        padding: 2,
+    },
+    qtyBtn: {
+        width: 28,
+        height: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.white,
+        borderRadius: 6,
+    },
+    qtyValue: {
+        paddingHorizontal: 12,
+        minWidth: 36,
+        alignItems: 'center',
+    },
+    // Store info card (replaces map)
+    storeInfoCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.white,
+        padding: 16,
+        borderRadius: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    storeIconContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 12,
+        backgroundColor: `${colors.primary}10`,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    etaBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FEFCE8',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+    },
+    // Simplified Coupon UI
+    applyCouponBtnSimple: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+    },
+    couponIconContainer: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        backgroundColor: `${colors.primary}10`,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    couponCountBadgeSimple: {
+        backgroundColor: `${colors.primary}10`,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        marginRight: 8,
+    },
+    appliedCouponRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F0FDF4',
+        padding: 12,
+        borderRadius: 10,
+        marginTop: 8,
+    },
+    couponCodeBadgeSimple: {
+        backgroundColor: '#DCFCE7',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: '#BBF7D0',
+    },
+    removeCouponBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        backgroundColor: '#FEE2E2',
+        borderRadius: 6,
+    },
+    couponCountBadge: {
+        backgroundColor: colors.primary,
+        minWidth: 22,
+        height: 22,
+        borderRadius: 11,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 8,
+    },
+    couponRow: {
+        paddingVertical: 4,
+    },
+    couponTag: {
+        backgroundColor: '#DCFCE7',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 4,
+        marginLeft: 8,
+    },
+    savingsBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F0FDF4',
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#BBF7D0',
+    },
+    // New Delivery Section styles
+    deliverySection: {
+        backgroundColor: colors.white,
+        padding: 16,
+        borderRadius: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    deliveryHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    changeAddressButton: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        backgroundColor: `${colors.primary}10`,
+        borderRadius: 20,
+    },
+    addressDetails: {
+        marginBottom: 12,
+    },
+    storeInfoInline: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingTop: 12,
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+    },
+    // Redesigned Checkout Qty Controls
+    checkoutQtyContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.white,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 10,
+        padding: 2,
+    },
+    checkoutQtyBtn: {
+        width: 32,
+        height: 32,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    checkoutQtyValue: {
+        paddingHorizontal: 12,
+        minWidth: 32,
+        alignItems: 'center',
+    },
+    // Remove Modal Styles
+    removeModalItemCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F9FAFB',
+        padding: 16,
+        borderRadius: 16,
+        marginVertical: 12,
+    },
+    removeModalItemImage: {
+        width: 64,
+        height: 64,
+        borderRadius: 12,
+        backgroundColor: colors.white,
+    },
+    removeModalActions: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 24,
+    },
+    cancelRemoveBtn: {
+        flex: 1,
+        height: 52,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.white,
+    },
+    confirmRemoveBtn: {
+        flex: 1,
+        height: 52,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.error,
+    },
+    // New Footer styles
+    newFooter: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: colors.white,
+        paddingHorizontal: 16,
+        paddingTop: 16,
+        paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: -4 },
+                shadowOpacity: 0.1,
+                shadowRadius: 12,
+            },
+            android: {
+                elevation: 10,
+            },
+        }),
+    },
+    stickyDeliveryContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingBottom: 12,
+    },
+    deliveryIconCircle: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: `${colors.primary}10`,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    deliveryInfo: {
+        flex: 1,
+    },
+    footerDivider: {
+        height: 1,
+        backgroundColor: '#F3F4F6',
+        marginBottom: 12,
+    },
+    footerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    paymentSelector: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 4,
+    },
+    paymentText: {
+        justifyContent: 'center',
+    },
+    paymentMethodRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 2,
+    },
+    newPayBtn: {
+        flex: 1,
+        height: 52,
+        backgroundColor: colors.primary,
+        borderRadius: 14,
+        overflow: 'hidden',
+    },
+    payBtnContent: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+    },
+    payBtnSeparator: {
+        width: 1,
+        height: 24,
+        backgroundColor: 'rgba(255, 255, 255, 0.3)',
+        marginHorizontal: 12,
+    },
+    payBtnAction: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    // Payment Modal styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        backgroundColor: colors.white,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: 24,
+    },
+
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 24,
+    },
+    paymentOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 2,
+        borderColor: colors.border,
+        marginBottom: 12,
+    },
+    paymentOptionSelected: {
+        borderColor: colors.primary,
+        backgroundColor: `${colors.primary}08`,
+    },
+    paymentOptionIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: 12,
+        backgroundColor: '#F3F4F6',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 16,
+    },
+    radioOuter: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: colors.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginLeft: 'auto',
+    },
+    radioOuterSelected: {
+        borderColor: colors.primary,
+    },
+    radioInner: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: colors.primary,
+    },
 });

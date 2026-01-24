@@ -2,7 +2,5 @@
 export { AvailableOrderCard } from './AvailableOrderCard';
 export { OrderDetailModal } from './OrderDetailModal';
 export { ActiveOrderCard } from './ActiveOrderCard';
-export { TodaysDeliveryCard } from './TodaysDeliveryCard';
 export { HistoryOrderCard } from './HistoryOrderCard';
 export { PartnerHeader } from './PartnerHeader';
-export { AssignedSubscriptionCard } from './AssignedSubscriptionCard';

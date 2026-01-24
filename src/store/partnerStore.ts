@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import { PartnerOrder, SubscriptionDelivery, PartnerSubscription } from '../types/partner';
+import { PartnerOrder } from '../types/partner';
 import { partnerService } from '../services/partner/partner.service';
 import { logger } from '../utils/logger';
+import { notifyNewOrderAvailable, setAppBadgeCount } from '../services/notification/notification.service';
 
 interface PartnerState {
     // Available orders
@@ -19,12 +20,7 @@ interface PartnerState {
     isLoadingHistory: boolean;
     historyError: string | null;
 
-    // Subscription deliveries
-    todayDeliveries: SubscriptionDelivery[];
-    upcomingDeliveries: SubscriptionDelivery[];
-    activeSubscriptions: PartnerSubscription[];
-    isLoadingSubscriptions: boolean;
-    subscriptionError: string | null;
+
 
     // Selected order for modal
     selectedOrder: PartnerOrder | null;
@@ -34,8 +30,7 @@ interface PartnerState {
     fetchAvailableOrders: (branchId: string) => Promise<void>;
     fetchActiveOrders: (partnerId: string) => Promise<void>;
     fetchHistoryOrders: (partnerId: string) => Promise<void>;
-    fetchDailyDeliveries: (partnerId: string) => Promise<void>;
-    fetchActiveSubscriptions: (partnerId: string) => Promise<void>;
+
 
     // Order management
     acceptOrder: (orderId: string, partnerId: string) => Promise<boolean>;
@@ -70,11 +65,8 @@ export const usePartnerStore = create<PartnerState>((set, get) => ({
     isLoadingHistory: false,
     historyError: null,
 
-    todayDeliveries: [],
-    upcomingDeliveries: [],
-    activeSubscriptions: [],
-    isLoadingSubscriptions: false,
-    subscriptionError: null,
+
+
 
     selectedOrder: null,
     isModalVisible: false,
@@ -85,6 +77,8 @@ export const usePartnerStore = create<PartnerState>((set, get) => ({
         try {
             const response = await partnerService.getAvailableOrders(branchId);
             set({ availableOrders: response.orders, isLoadingAvailable: false });
+            // Sync badge with fresh count
+            setAppBadgeCount(response.orders.length);
         } catch (error: any) {
             set({
                 availableError: error.response?.data?.message || 'Failed to fetch available orders',
@@ -121,37 +115,7 @@ export const usePartnerStore = create<PartnerState>((set, get) => ({
         }
     },
 
-    // Fetch daily deliveries
-    fetchDailyDeliveries: async (partnerId: string) => {
-        set({ isLoadingSubscriptions: true, subscriptionError: null });
-        try {
-            const response = await partnerService.getDailyDeliveries(partnerId);
-            set({
-                todayDeliveries: response.todayDeliveries,
-                upcomingDeliveries: response.upcomingDeliveries,
-                isLoadingSubscriptions: false
-            });
-        } catch (error: any) {
-            set({
-                subscriptionError: error.response?.data?.message || 'Failed to fetch deliveries',
-                isLoadingSubscriptions: false
-            });
-        }
-    },
 
-    // Fetch active subscriptions
-    fetchActiveSubscriptions: async (partnerId: string) => {
-        set({ isLoadingSubscriptions: true, subscriptionError: null });
-        try {
-            const response = await partnerService.getActiveSubscriptions(partnerId);
-            set({ activeSubscriptions: response.data, isLoadingSubscriptions: false });
-        } catch (error: any) {
-            set({
-                subscriptionError: error.response?.data?.message || 'Failed to fetch subscriptions',
-                isLoadingSubscriptions: false
-            });
-        }
-    },
 
     // Accept an order
     acceptOrder: async (orderId: string, partnerId: string) => {
@@ -209,11 +173,23 @@ export const usePartnerStore = create<PartnerState>((set, get) => ({
 
     // Socket event handlers
     addAvailableOrder: (order: PartnerOrder) => {
-        set({ availableOrders: [order, ...get().availableOrders] });
+        // Add order to list
+        const updatedOrders = [order, ...get().availableOrders];
+        set({ availableOrders: updatedOrders });
+
+        // Trigger push notification for new order
+        const orderAmount = order.totalPrice || 0;
+        notifyNewOrderAvailable(orderAmount, order._id);
+
+        // Update app badge count
+        setAppBadgeCount(updatedOrders.length);
     },
 
     removeAvailableOrder: (orderId: string) => {
-        set({ availableOrders: get().availableOrders.filter(o => o._id !== orderId) });
+        const updatedOrders = get().availableOrders.filter(o => o._id !== orderId);
+        set({ availableOrders: updatedOrders });
+        // Update app badge count
+        setAppBadgeCount(updatedOrders.length);
     },
 
     updateOrderInList: (order: PartnerOrder) => {
@@ -252,9 +228,7 @@ export const usePartnerStore = create<PartnerState>((set, get) => ({
             availableOrders: [],
             activeOrders: [],
             historyOrders: [],
-            todayDeliveries: [],
-            upcomingDeliveries: [],
-            activeSubscriptions: [],
+
             selectedOrder: null,
             isModalVisible: false,
         });

@@ -10,15 +10,20 @@ import {
 } from 'react-native';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView } from '@react-native-community/blur';
 import { MonoText } from '../../../components/shared/MonoText';
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';
 
+const HEADER_CONTENT_HEIGHT = 56;
+
 export const PrivacyPolicyScreen = () => {
     const navigation = useNavigation();
+    const insets = useSafeAreaInsets();
 
     const handleContactPress = () => {
-        Linking.openURL('mailto:contact@lushandpures.com');
+        Linking.openURL('mailto:contact@takesmart.com');
     };
 
     return (
@@ -26,15 +31,23 @@ export const PrivacyPolicyScreen = () => {
             <StatusBar barStyle="dark-content" backgroundColor={colors.white} />
 
             {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
-                        <Path d="M19 12H5" />
-                        <Path d="M12 19l-7-7 7-7" />
-                    </Svg>
-                </TouchableOpacity>
-                <MonoText size="l" weight="bold">Privacy Policy</MonoText>
-                <View style={{ width: 44 }} />
+            <View style={[styles.header, { paddingTop: insets.top }]}>
+                <BlurView
+                    style={StyleSheet.absoluteFill}
+                    blurType="light"
+                    blurAmount={20}
+                    reducedTransparencyFallbackColor="white"
+                />
+                <View style={styles.headerContent}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
+                            <Path d="M19 12H5" />
+                            <Path d="M12 19l-7-7 7-7" />
+                        </Svg>
+                    </TouchableOpacity>
+                    <MonoText size="l" weight="bold" style={styles.headerTitle}>Privacy Policy</MonoText>
+                    <View style={{ width: 40 }} />
+                </View>
             </View>
 
             <ScrollView
@@ -58,7 +71,7 @@ export const PrivacyPolicyScreen = () => {
                 {/* Introduction */}
                 <View style={styles.section}>
                     <MonoText size="s" color={colors.textLight} style={styles.paragraph}>
-                        LUSHPURE RURALFIELDS PRIVATE LIMITED ("LUSHPURE RURALFIELDS", "we", "us", or "our") respects your privacy and is committed to protecting the personal information you provide through our app. This Privacy Policy describes the types of information we collect, how we use it, and the choices you have about your information.
+                        TAKESMART RURALFIELDS PRIVATE LIMITED ("TAKESMART RURALFIELDS", "we", "us", or "our") respects your privacy and is committed to protecting the personal information you provide through our app. This Privacy Policy describes the types of information we collect, how we use it, and the choices you have about your information.
                     </MonoText>
                 </View>
 
@@ -342,7 +355,7 @@ export const PrivacyPolicyScreen = () => {
                         </View>
                         <View style={{ flex: 1 }}>
                             <MonoText size="xs" color={colors.textLight}>EMAIL</MonoText>
-                            <MonoText size="s" weight="semiBold">contact@lushandpures.com</MonoText>
+                            <MonoText size="s" weight="semiBold">contact@takesmart.com</MonoText>
                         </View>
                     </TouchableOpacity>
 
@@ -364,12 +377,12 @@ export const PrivacyPolicyScreen = () => {
 
                 {/* Footer */}
                 <View style={styles.footer}>
-                    <MonoText size="m" weight="bold" color={colors.primary}>LushandPure</MonoText>
+                    <MonoText size="m" weight="bold" color={colors.primary}>TakeSmart</MonoText>
                     <MonoText size="xs" color={colors.textLight} style={{ marginTop: 4 }}>
                         Fresh & Pure Dairy Delivered
                     </MonoText>
                     <MonoText size="xs" color={colors.textLight} style={{ marginTop: spacing.s }}>
-                        © 2024 LushPure RuralFields Private Limited
+                        © 2024 TakeSmart RuralFields Private Limited
                     </MonoText>
                 </View>
 
@@ -385,23 +398,37 @@ const styles = StyleSheet.create({
         backgroundColor: colors.white,
     },
     header: {
+        backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        overflow: 'hidden',
+    },
+    headerContent: {
+        height: HEADER_CONTENT_HEIGHT,
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + spacing.s : 50,
-        paddingBottom: spacing.m,
-        paddingHorizontal: spacing.m,
-        backgroundColor: colors.white,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
+        paddingHorizontal: 16,
+    },
+    headerTitle: {
+        flex: 1,
+        marginLeft: 12,
     },
     backBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: '#F3F4F6',
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: colors.white,
         alignItems: 'center',
         justifyContent: 'center',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
     },
     scrollView: {
         flex: 1,

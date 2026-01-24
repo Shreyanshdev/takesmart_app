@@ -104,6 +104,20 @@ class SocketService {
         }
     }
 
+    joinOrderRoom(orderId: string): void {
+        if (this.socket?.connected) {
+            this.socket.emit('joinRoom', orderId);
+            logger.socket('joinOrderRoom', orderId);
+        }
+    }
+
+    leaveOrderRoom(orderId: string): void {
+        if (this.socket?.connected) {
+            this.socket.emit('leaveRoom', orderId);
+            logger.socket('leaveOrderRoom', orderId);
+        }
+    }
+
     // Event management with callback tracking
     on(event: string, callback: Function): void {
         if (this.socket) {

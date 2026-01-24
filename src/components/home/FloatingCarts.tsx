@@ -1,109 +1,146 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Dimensions, Image, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import Animated, { useAnimatedStyle, withTiming, useSharedValue } from 'react-native-reanimated';
+import Animated, {
+    useAnimatedStyle,
+    withTiming,
+    useSharedValue,
+    withSpring,
+    withSequence
+} from 'react-native-reanimated';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../shared/MonoText';
-import Svg, { Path, Polyline, Circle } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { useCartStore } from '../../store/cart.store';
-import { useSubscriptionCartStore } from '../../store/subscriptionCart.store';
 import { useHomeStore } from '../../store/home.store';
 
 const { width } = Dimensions.get('window');
 
-export const FloatingCarts = () => {
+// Premium Green Palette
+const CART_GREEN = '#2E7D32';
+const DARK_GREEN = '#1B5E20';
+
+export interface FloatingCartsProps {
+    showWithTabBar?: boolean;
+    offsetBottom?: number;
+    onPress?: () => void;
+}
+
+export const FloatingCarts: React.FC<FloatingCartsProps> = ({
+    showWithTabBar = true,
+    offsetBottom,
+    onPress
+}) => {
     const navigation = useNavigation<any>();
     const isTabBarVisible = useHomeStore(state => state.isTabBarVisible);
 
-    // Regular Cart (Green)
-    const { items: cartItems, getTotalPrice: getCartTotal } = useCartStore();
+    // Cart State
+    const { items: cartItems } = useCartStore();
     const cartItemCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
-    const cartTotal = getCartTotal();
 
-    // Subscription Cart (Red)
-    const { items: subItems } = useSubscriptionCartStore();
-    const subItemCount = subItems.length;
+    // Get up to 3 latest product images
+    const cartImages = [...cartItems]
+        .reverse()
+        .slice(0, 3)
+        .map(item => item.product.images?.[0])
+        .filter(img => !!img);
 
-    // Animation
-    const translateY = useSharedValue(0);
+    // Animation values
+    const translateY = useSharedValue(100);
+    const scale = useSharedValue(1);
 
     useEffect(() => {
-        // If tab bar is visible (bottom 0), carts should be higher (e.g., bottom 80).
-        // If tab bar is hidden (translated down), carts should move down to fill space (bottom 20).
-        // But user said: "floating like if bottom bar collapse slightly below according bottombar state they also move"
-        // This usually means they stick to the tab bar top.
-        // Let's assume TabBar height is ~80px.
-        translateY.value = withTiming(isTabBarVisible ? 0 : 60, { duration: 300 });
-    }, [isTabBarVisible]);
+        // Entry animation
+        if (cartItemCount > 0) {
+            // In modal/detail mode (showWithTabBar=false), we want it to stay at its base position (0)
+            // In home mode (showWithTabBar=true), it responsive to tab bar visibility
+            const targetY = showWithTabBar ? (isTabBarVisible ? 0 : 70) : 0;
+            translateY.value = withSpring(targetY, {
+                damping: 15,
+                stiffness: 100
+            });
+        } else {
+            translateY.value = withTiming(100);
+        }
+    }, [isTabBarVisible, cartItemCount, showWithTabBar]);
+
+    useEffect(() => {
+        // Pulse animation on item count change
+        if (cartItemCount > 0) {
+            scale.value = withSequence(
+                withTiming(1.05, { duration: 100 }),
+                withSpring(1, { damping: 12, stiffness: 200 })
+            );
+        }
+    }, [cartItemCount]);
 
     const animatedStyle = useAnimatedStyle(() => ({
-        transform: [{ translateY: translateY.value }],
+        transform: [
+            { translateY: translateY.value },
+            { scale: scale.value }
+        ],
+        opacity: withTiming(cartItemCount > 0 ? 1 : 0),
     }));
 
-    if (cartItemCount === 0 && subItemCount === 0) return null;
+    if (cartItemCount === 0) return null;
 
-    // Regular Cart Press
     const handleCartPress = () => {
-        navigation.navigate('AddressSelection', { mode: 'cart' });
-    };
-
-    // Subscription Cart Press
-    const handleSubPress = () => {
-        if (subItems.length > 0) {
-            navigation.navigate('AddressSelection', {
-                mode: 'subscription',
-                subscriptionItems: subItems
-            });
+        if (onPress) {
+            onPress();
+        } else {
+            navigation.navigate('Checkout', { showAddressModal: true });
         }
     };
 
-    const hasBoth = cartItemCount > 0 && subItemCount > 0;
+    const containerStyle = [
+        styles.container,
+        { bottom: Platform.OS === 'ios' ? (showWithTabBar ? 95 : 30) : (showWithTabBar ? 85 : 20) },
+        offsetBottom !== undefined && { bottom: offsetBottom },
+        animatedStyle
+    ];
 
     return (
-        <Animated.View style={[styles.container, animatedStyle]}>
-            {/* Subscription Cart Indicator (Red) */}
-            {subItemCount > 0 && (
-                <TouchableOpacity
-                    style={[
-                        styles.cartPill,
-                        styles.subPill,
-                        hasBoth ? styles.halfWidth : styles.centeredHalf
-                    ]}
-                    onPress={handleSubPress}
-                    activeOpacity={0.9}
-                >
-                    <View style={styles.iconRow}>
-                        <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2">
-                            <Path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                            <Polyline points="23 4 23 10 17 10" />
-                        </Svg>
-                        <MonoText size="xs" weight="bold" color={colors.white}>{subItemCount} Items</MonoText>
-                    </View>
-                </TouchableOpacity>
-            )}
+        <Animated.View style={containerStyle}>
+            <TouchableOpacity
+                style={styles.cartPill}
+                onPress={handleCartPress}
+                activeOpacity={0.9}
+            >
+                {/* Product Image Stack */}
+                <View style={styles.imageStack}>
+                    {cartImages.map((img, index) => (
+                        <View
+                            key={`cart-img-${index}`}
+                            style={[
+                                styles.imageWrapper,
+                                { zIndex: 10 - index, marginLeft: index === 0 ? 0 : -20 }
+                            ]}
+                        >
+                            <Image
+                                source={{ uri: img }}
+                                style={styles.productImg}
+                                resizeMode="cover"
+                            />
+                        </View>
+                    ))}
+                </View>
 
-            {/* Regular Cart Indicator (Green) */}
-            {cartItemCount > 0 && (
-                <TouchableOpacity
-                    style={[
-                        styles.cartPill,
-                        styles.regPill,
-                        hasBoth ? styles.halfWidth : styles.centeredHalf
-                    ]}
-                    onPress={handleCartPress}
-                    activeOpacity={0.9}
-                >
-                    <View style={styles.iconRow}>
-                        <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2">
-                            <Circle cx="9" cy="21" r="1" />
-                            <Circle cx="20" cy="21" r="1" />
-                            <Path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
-                        </Svg>
-                        <MonoText size="xs" weight="bold" color={colors.white}>{cartItemCount} Items | ₹{cartTotal}</MonoText>
-                    </View>
-                </TouchableOpacity>
-            )}
+                {/* Cart Info */}
+                <View style={styles.infoContainer}>
+                    <MonoText size="m" weight="bold" color={colors.white}>View cart</MonoText>
+                    <MonoText size="s" color={colors.white} style={styles.itemCountText}>
+                        {cartItemCount} {cartItemCount === 1 ? 'item' : 'items'}
+                    </MonoText>
+                </View>
+
+                {/* Chevron */}
+                <View style={styles.chevronContainer}>
+                    <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="3">
+                        <Path d="M9 18l6-6-6-6" />
+                    </Svg>
+                </View>
+            </TouchableOpacity>
         </Animated.View>
     );
 };
@@ -111,54 +148,65 @@ export const FloatingCarts = () => {
 const styles = StyleSheet.create({
     container: {
         position: 'absolute',
-        bottom: 70, // Initial position above TabBar
         left: spacing.m,
         right: spacing.m,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
+        zIndex: 1000,
         alignItems: 'center',
-        gap: spacing.m,
-        zIndex: 100,
     },
     cartPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        borderRadius: 24, // More rounded as requested
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 5,
-        elevation: 5,
+        backgroundColor: CART_GREEN,
+        height: 60,
+        borderRadius: 30,
+        paddingHorizontal: 12,
+        paddingRight: 8,
+        maxWidth: width * 0.9,
+        ...Platform.select({
+            ios: {
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.3,
+                shadowRadius: 10,
+            },
+            android: {
+                elevation: 8,
+            },
+        }),
     },
-    halfWidth: {
-        flex: 1,
-    },
-    centeredHalf: {
-        width: '50%',
-        alignSelf: 'center',
-        marginHorizontal: 'auto', // For centering in flex container (though alignSelf works)
-        left: '25%', // Hack to center absolutely if needed, but in flex row justifyContent center works better.
-        // Actually, since container is 'space-between', if only one item, it sits on left. 
-        // We need to override container behavior or use margin. 
-        // Let's rely on margins or flex properties. 
-        // Actually simplest way: if !hasBoth, set container logic to justify-center? 
-        // But styles are static.
-        // Let's use 'width: 50%' and 'marginLeft: auto', 'marginRight: auto'
-        marginLeft: 'auto',
-        marginRight: 'auto',
-    },
-    subPill: {
-        backgroundColor: '#EF4444',
-    },
-    regPill: {
-        backgroundColor: colors.success,
-    },
-    iconRow: {
+    imageStack: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        marginRight: 10,
+    },
+    imageWrapper: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        borderWidth: 2,
+        borderColor: CART_GREEN,
+        backgroundColor: colors.white,
+        overflow: 'hidden',
+    },
+    productImg: {
+        width: '100%',
+        height: '100%',
+    },
+    infoContainer: {
+        justifyContent: 'center',
+        marginHorizontal: 6,
+    },
+    itemCountText: {
+        opacity: 0.9,
+        marginTop: -2,
+    },
+    chevronContainer: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: DARK_GREEN,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginLeft: 4,
     },
 });

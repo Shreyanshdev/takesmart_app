@@ -161,7 +161,7 @@ export const animalHealthService = {
      * Get animal health for all subscribed products
      */
     getMySubscribedProductsHealth: async (): Promise<AnimalHealthResponse> => {
-        const response = await api.get<AnimalHealthResponse>('/animal-health/my-products');
+        const response = await api.get<AnimalHealthResponse>('animal-health/my-products');
         return response.data;
     },
 
@@ -170,7 +170,7 @@ export const animalHealthService = {
      * User must be subscribed to this product
      */
     getProductHealth: async (productId: string): Promise<ProductHealthResponse> => {
-        const response = await api.get<ProductHealthResponse>(`/animal-health/product/${productId}`);
+        const response = await api.get<ProductHealthResponse>(`animal-health/product/${productId}`);
         return response.data;
     },
 };

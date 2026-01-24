@@ -6,7 +6,7 @@ import { MonoText } from '../../../components/shared/MonoText';
 import Svg, { Path, Circle, Polyline, Line, Rect } from 'react-native-svg';
 import { Address, addressService } from '../../../services/customer/address.service';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logger } from '../../../utils/logger';
 
 // Icons
@@ -45,7 +45,8 @@ const Icons = {
 export const AddressSelectionScreen = () => {
     const navigation = useNavigation<any>();
     const route = useRoute<any>();
-    const { mode, subscriptionItem, subscriptionItems } = route.params || {};
+    const insets = useSafeAreaInsets();
+    const { mode } = route.params || {};
 
     const [addresses, setAddresses] = useState<Address[]>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -127,8 +128,7 @@ export const AddressSelectionScreen = () => {
         if (selectedId) {
             navigation.navigate('Checkout', {
                 addressId: selectedId,
-                mode: mode || 'cart',
-                subscriptionItems: subscriptionItems || (subscriptionItem ? [subscriptionItem] : undefined)
+                mode: mode || 'cart'
             });
         }
     };
@@ -146,8 +146,8 @@ export const AddressSelectionScreen = () => {
     };
 
     return (
-        <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
+        <View style={styles.container}>
+            <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <Path d="M19 12H5M12 19l-7-7 7-7" />
@@ -205,7 +205,15 @@ export const AddressSelectionScreen = () => {
                                             </View>
                                         )}
                                     </View>
+                                    {addr.receiverName && (
+                                        <MonoText size="xs" color={colors.primary} weight="bold" style={{ marginBottom: 2 }}>
+                                            For: {addr.receiverName}
+                                        </MonoText>
+                                    )}
                                     <MonoText color={colors.text} numberOfLines={1}>{addr.addressLine1}</MonoText>
+                                    {addr.addressLine2 && (
+                                        <MonoText color={colors.textLight} size="s" numberOfLines={1}>{addr.addressLine2}</MonoText>
+                                    )}
                                     <MonoText color={colors.textLight} size="s">{addr.city}, {addr.zipCode}</MonoText>
                                 </View>
                                 {/* Edit/Delete Actions */}
@@ -241,7 +249,7 @@ export const AddressSelectionScreen = () => {
                 </View>
             )}
 
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
                 <TouchableOpacity
                     style={[styles.confirmBtn, !selectedId && styles.disabledBtn]}
                     disabled={!selectedId}
@@ -250,7 +258,7 @@ export const AddressSelectionScreen = () => {
                     <MonoText weight="bold" color={colors.white}>Confirm Address</MonoText>
                 </TouchableOpacity>
             </View>
-        </SafeAreaView>
+        </View>
     );
 };
 

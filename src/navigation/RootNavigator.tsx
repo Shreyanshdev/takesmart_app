@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Image, StatusBar, Dimensions } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+
 import { colors } from '../theme/colors';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -8,43 +9,55 @@ import { TabNavigator } from './TabNavigator';
 import { PartnerTabNavigator } from './PartnerTabNavigator';
 import { CustomerLoginScreen } from '../screens/auth/CustomerLoginScreen';
 import { PartnerLoginScreen } from '../screens/auth/PartnerLoginScreen';
+import { OnboardingScreen } from '../screens/auth/OnboardingScreen';
+import { CompleteProfileScreen } from '../screens/auth/CompleteProfileScreen';
 import { AddressSelectionScreen } from '../screens/customer/Checkout/AddressSelectionScreen';
 import { AddAddressScreen } from '../screens/customer/Checkout/AddAddressScreen';
 import { CheckoutScreen } from '../screens/customer/Checkout/CheckoutScreen';
 import { OrderTrackingScreen } from '../screens/customer/Orders/OrderTrackingScreen';
 import { PartnerOrderTrackingScreen } from '../screens/partner/PartnerOrderTrackingScreen';
 import { useAuthStore } from '../store/authStore';
-import { SubscriptionCalendarScreen } from '../screens/customer/Subscription/SubscriptionCalendarScreen';
-import { AddProductToSubscriptionScreen } from '../screens/customer/Subscription/AddProductToSubscriptionScreen';
+import { useBranchStore } from '../store/branch.store';
 import { CategoriesScreen } from '../screens/customer/Product/CategoriesScreen';
 import { SearchScreen } from '../screens/customer/Product/SearchScreen';
 import { ProfileScreen } from '../screens/customer/Profile/ProfileScreen';
+import { EditProfileScreen } from '../screens/customer/Profile/EditProfileScreen';
 import { AnimalHealthScreen } from '../screens/customer/Animal/AnimalHealthScreen';
-import { SubscriptionHistoryScreen } from '../screens/customer/Subscription/SubscriptionHistoryScreen';
-import { SubscriptionInvoiceScreen } from '../screens/customer/Subscription/SubscriptionInvoiceScreen';
+import { OrderHistoryScreen } from '../screens/customer/Orders/OrderHistoryScreen';
 import { PrivacyPolicyScreen } from '../screens/customer/Settings/PrivacyPolicyScreen';
 import { FeedbackScreen } from '../screens/customer/Profile/FeedbackScreen';
+import { BrowseProductsScreen } from '../screens/customer/BrowseProductsScreen';
+import { WishlistScreen } from '../screens/customer/WishlistScreen';
+import { TermsScreen } from '../screens/customer/Profile/TermsScreen';
 import { logger } from '../utils/logger';
 
 const Stack = createNativeStackNavigator();
 
 // Maximum time to wait on splash screen before forcing navigation (3 seconds)
 const MAX_SPLASH_TIME_MS = 3000;
+const ONBOARDING_KEY = 'hasSeenOnboarding';
+
+import { navigationRef } from '../services/navigation/NavigationService';
+
+import { SuccessToast } from '../components/SuccessToast';
 
 export const RootNavigator = () => {
     const { isAuthenticated, isLoading, user, initialize } = useAuthStore();
+    const { currentBranch, initialize: initBranch } = useBranchStore();
     const [forceShowApp, setForceShowApp] = useState(false);
     const [initStarted, setInitStarted] = useState(false);
-
     useEffect(() => {
         logger.debug('[RootNavigator] Component mounted, starting initialization...');
 
-        if (!initStarted) {
-            setInitStarted(true);
-            initialize().catch((err) => {
-                logger.error('RootNavigator Initialize error:', err);
-            });
-        }
+        setInitStarted(true);
+        // Initialize auth and branch stores
+        Promise.all([
+            initialize(),
+            initBranch()
+        ]).catch((err) => {
+            logger.error('RootNavigator Initialize error:', err);
+        });
+
 
         // Failsafe: Force show the app after MAX_SPLASH_TIME_MS even if isLoading is still true
         const timeoutId = setTimeout(() => {
@@ -66,7 +79,7 @@ export const RootNavigator = () => {
             >
                 <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
                 <Image
-                    source={require('../assets/images/lpp.png')}
+                    source={require('../assets/images/logo.png')}
                     style={styles.splashImage}
                     resizeMode="contain"
                 />
@@ -78,11 +91,12 @@ export const RootNavigator = () => {
     const isDeliveryPartner = user?.role === 'DeliveryPartner';
 
     return (
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
             <Stack.Navigator
                 screenOptions={{
                     headerShown: false,
                     animation: 'slide_from_right',
+                    contentStyle: { backgroundColor: colors.white }
                 }}
             >
                 {isAuthenticated ? (
@@ -93,6 +107,7 @@ export const RootNavigator = () => {
                             <Stack.Screen name="PartnerOrderTracking" component={PartnerOrderTrackingScreen} />
                             <Stack.Screen name="Profile" component={ProfileScreen} />
                             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+                            <Stack.Screen name="Terms" component={TermsScreen} />
                         </Stack.Group>
                     ) : (
                         // Customer Navigation
@@ -103,25 +118,29 @@ export const RootNavigator = () => {
                             <Stack.Screen name="AddAddressMap" component={AddAddressScreen} />
                             <Stack.Screen name="Checkout" component={CheckoutScreen} />
                             <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
-                            <Stack.Screen name="SubscriptionCalendar" component={SubscriptionCalendarScreen} />
-                            <Stack.Screen name="AddProductToSubscription" component={AddProductToSubscriptionScreen} />
                             <Stack.Screen name="Categories" component={CategoriesScreen} />
                             <Stack.Screen name="Search" component={SearchScreen} />
                             <Stack.Screen name="Profile" component={ProfileScreen} />
+                            <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+                            <Stack.Screen name="OrderHistory" component={OrderHistoryScreen} />
                             <Stack.Screen name="AnimalHealth" component={AnimalHealthScreen} />
-                            <Stack.Screen name="SubscriptionHistory" component={SubscriptionHistoryScreen} />
-                            <Stack.Screen name="SubscriptionInvoice" component={SubscriptionInvoiceScreen} />
                             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+                            <Stack.Screen name="Terms" component={TermsScreen} />
                             <Stack.Screen name="Feedback" component={FeedbackScreen} />
+                            <Stack.Screen name="BrowseProducts" component={BrowseProductsScreen} />
+                            <Stack.Screen name="Wishlist" component={WishlistScreen} />
+                            <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
                         </Stack.Group>
                     )
                 ) : (
                     <>
+                        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
                         <Stack.Screen name="CustomerLogin" component={CustomerLoginScreen} />
                         <Stack.Screen name="PartnerLogin" component={PartnerLoginScreen} />
                     </>
                 )}
             </Stack.Navigator>
+            <SuccessToast />
         </NavigationContainer>
     );
 };
@@ -136,3 +155,4 @@ const styles = StyleSheet.create({
         height: 200,
     },
 });
+

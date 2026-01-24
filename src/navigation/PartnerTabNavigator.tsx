@@ -9,7 +9,6 @@ import { usePartnerStore } from '../store/partnerStore';
 
 import { PartnerHomeScreen } from '../screens/partner/PartnerHomeScreen';
 import { ActiveOrdersScreen } from '../screens/partner/ActiveOrdersScreen';
-import { SubscriptionDeliveriesScreen } from '../screens/partner/SubscriptionDeliveriesScreen';
 import { HistoryScreen } from '../screens/partner/HistoryScreen';
 
 const Tab = createBottomTabNavigator();
@@ -17,7 +16,7 @@ const Tab = createBottomTabNavigator();
 interface TabIconProps {
     focused: boolean;
     color: string;
-    iconType: 'home' | 'active' | 'subscriptions' | 'history';
+    iconType: 'home' | 'active' | 'history';
 }
 
 const TabIcon: React.FC<TabIconProps> = ({ focused, color, iconType }) => {
@@ -36,14 +35,6 @@ const TabIcon: React.FC<TabIconProps> = ({ focused, color, iconType }) => {
             return (
                 <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
                     <Path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                </Svg>
-            );
-        case 'subscriptions':
-            return (
-                <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
-                    <Rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                    <Path d="M16 2v4M8 2v4M3 10h18" />
-                    <Path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" />
                 </Svg>
             );
         case 'history':
@@ -71,7 +62,7 @@ export const PartnerTabNavigator = () => {
                 tabBarInactiveTintColor: colors.textLight,
                 tabBarLabelStyle: styles.tabLabel,
                 tabBarItemStyle: styles.tabItem,
-            }}
+            } as any}
         >
             <Tab.Screen
                 name="PartnerHome"
@@ -83,7 +74,7 @@ export const PartnerTabNavigator = () => {
                     ),
                     // Show badge with available orders count
                     tabBarBadge: availableOrdersCount > 0 ? availableOrdersCount : undefined,
-                    tabBarBadgeStyle: styles.badge,
+                    tabBarBadgeStyle: styles.badge as any,
                 }}
             />
             <Tab.Screen
@@ -93,16 +84,6 @@ export const PartnerTabNavigator = () => {
                     tabBarLabel: 'Active',
                     tabBarIcon: ({ focused, color }) => (
                         <TabIcon focused={focused} color={color} iconType="active" />
-                    ),
-                }}
-            />
-            <Tab.Screen
-                name="Subscriptions"
-                component={SubscriptionDeliveriesScreen}
-                options={{
-                    tabBarLabel: 'Subscriptions',
-                    tabBarIcon: ({ focused, color }) => (
-                        <TabIcon focused={focused} color={color} iconType="subscriptions" />
                     ),
                 }}
             />
@@ -132,11 +113,17 @@ const styles = StyleSheet.create({
         borderTopColor: colors.border,
         paddingTop: spacing.xs,
         paddingBottom: Platform.OS === 'ios' ? 20 : 21,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 10,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: -2 },
+                shadowOpacity: 0.1,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 10,
+            },
+        }),
     },
     tabItem: {
         paddingTop: 4,

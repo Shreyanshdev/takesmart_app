@@ -61,7 +61,13 @@ export const CategoryGrid = ({ categories }: CategoryGridProps) => {
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <MonoText size="l" weight="bold">Categories</MonoText>
+                <View style={styles.headerTitleRow}>
+                    <View style={styles.decorativeLine} />
+                    <MonoText size="l" weight="bold" style={styles.headerTitle}>Explore Categories</MonoText>
+                    <View style={styles.decorativeLine} />
+                </View>
+                {/* Optional: Add See All if many categories */}
+                {/* <MonoText size="s" color={colors.primary} weight="bold">See All</MonoText> */}
             </View>
             <ScrollView
                 horizontal
@@ -81,11 +87,24 @@ const styles = StyleSheet.create({
         marginBottom: spacing.l,
     },
     header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: spacing.m,
         marginBottom: spacing.m,
+        paddingHorizontal: spacing.m,
+    },
+    headerTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: spacing.s,
+    },
+    headerTitle: {
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+        color: colors.textLight,
+    },
+    decorativeLine: {
+        height: 1,
+        backgroundColor: colors.border,
+        flex: 1,
     },
     scrollContent: {
         paddingHorizontal: spacing.m,

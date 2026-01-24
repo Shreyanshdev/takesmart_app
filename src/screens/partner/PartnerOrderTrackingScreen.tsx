@@ -12,9 +12,12 @@ import {
     PermissionsAndroid,
 } from 'react-native';
 import GetLocation from 'react-native-get-location';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { BlurView } from '@react-native-community/blur';
+import Modal from 'react-native-modal';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_DEFAULT, AnimatedRegion } from 'react-native-maps';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
@@ -44,10 +47,12 @@ interface RouteData {
 export const PartnerOrderTrackingScreen = () => {
     const navigation = useNavigation<any>();
     const route = useRoute<RouteProp<{ params: RouteParams }, 'params'>>();
+    const insets = useSafeAreaInsets();
     const { order: initialOrder } = route.params;
 
     const { user } = useAuthStore();
     const { pickupOrder, markDelivered } = usePartnerStore();
+
 
     const [order, setOrder] = useState<PartnerOrder>(initialOrder);
     const [partnerLocation, setPartnerLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -56,6 +61,17 @@ export const PartnerOrderTrackingScreen = () => {
     const [actionLoading, setActionLoading] = useState(false);
     const [locationError, setLocationError] = useState<string | null>(null);
     const [showLocationModal, setShowLocationModal] = useState(false);
+    const [noRouteFound, setNoRouteFound] = useState(false);
+    const [selectedItem, setSelectedItem] = useState<any>(null);
+    const [showItemModal, setShowItemModal] = useState(false);
+
+    // Animated Location for smooth marker movement
+    const partnerLocationAnimated = useRef(new AnimatedRegion({
+        latitude: initialOrder.deliveryLocation?.latitude || 26.4499,
+        longitude: initialOrder.deliveryLocation?.longitude || 80.3319,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+    })).current;
 
     const mapRef = useRef<MapView>(null);
     const partnerMarkerRef = useRef<any>(null);
@@ -74,7 +90,7 @@ export const PartnerOrderTrackingScreen = () => {
                     PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
                     {
                         title: 'Location Permission',
-                        message: 'LushAndPure Partner App needs access to your location to track deliveries.',
+                        message: 'TakeSmart Partner App needs access to your location to track deliveries.',
                         buttonNeutral: 'Ask Me Later',
                         buttonNegative: 'Cancel',
                         buttonPositive: 'OK',
@@ -110,8 +126,20 @@ export const PartnerOrderTrackingScreen = () => {
             })
             .catch(error => {
                 logger.error('Initial location error:', error);
-                setLocationError('Location services disabled');
-                setShowLocationModal(true);
+                // Only show permission modal for specific permission/disabled errors
+                // Error codes: CANCELLED, UNAVAILABLE, TIMEOUT, PLAY_SERVICES_NOT_AVAILABLE
+                const { code } = error;
+                if (code === 'UNAVAILABLE' || code === 'CANCELLED') {
+                    setLocationError('Location services disabled');
+                    setShowLocationModal(true);
+                } else if (code === 'TIMEOUT') {
+                    // For timeout, just retry silently without showing modal
+                    setLocationError('Unable to get location. Please ensure GPS is enabled.');
+                    // Try again after a delay
+                    setTimeout(checkAndInitLocation, 3000);
+                } else {
+                    setLocationError('Location error');
+                }
             });
     };
 
@@ -119,8 +147,51 @@ export const PartnerOrderTrackingScreen = () => {
     useEffect(() => {
         checkAndInitLocation();
 
+        // Initial data fetch to ensure items are populated
+        if (order._id) {
+            setIsLoading(true);
+            partnerService.getOrderById(order._id).then((res: { order: PartnerOrder }) => {
+                if (res.order) setOrder(res.order);
+                setIsLoading(false);
+            }).catch(err => {
+                logger.error('Initial fetch failed', err);
+                setIsLoading(false);
+            });
+        }
+
+        // Socket integration
+        if (order._id) {
+            socketService.joinOrderRoom(order._id);
+
+            socketService.on('orderStatusUpdated', (data: any) => {
+                if (data.orderId === order._id) {
+                    logger.log('Order status updated via socket', data.status);
+                    // Refresh order data
+                    partnerService.getOrderById(order._id).then((res: { order: PartnerOrder }) => {
+                        if (res.order) setOrder(res.order);
+                    });
+                }
+            });
+
+            socketService.on('orderLocationUpdated', (data: any) => {
+                if (data.orderId === order._id) {
+                    // Update order with new locations if they changed
+                    setOrder(prev => ({
+                        ...prev,
+                        deliveryLocation: data.deliveryLocation || prev.deliveryLocation,
+                        pickupLocation: data.pickupLocation || prev.pickupLocation
+                    }));
+                }
+            });
+        }
+
         return () => {
             stopTracking();
+            if (order._id) {
+                socketService.leaveOrderRoom(order._id);
+                socketService.off('orderStatusUpdated');
+                socketService.off('orderLocationUpdated');
+            }
         };
     }, []);
 
@@ -153,23 +224,29 @@ export const PartnerOrderTrackingScreen = () => {
                 timeout: 15000,
             })
                 .then(location => {
-                    const { latitude, longitude } = location;
+                    if (location) {
+                        const { latitude, longitude } = location;
 
-                    if (partnerMarkerRef.current) {
-                        partnerMarkerRef.current.animateMarkerToCoordinate({ latitude, longitude }, 2000);
-                    }
-                    setPartnerLocation({ latitude, longitude });
+                        (partnerLocationAnimated.timing({
+                            latitude,
+                            longitude,
+                            duration: 2000,
+                            useNativeDriver: false
+                        } as any) as any).start();
 
-                    // Update backend with new location
-                    if (partnerId && order._id) {
-                        partnerService.updateLocation(order._id, {
-                            deliveryPartnerId: partnerId,
-                            location: {
-                                latitude,
-                                longitude,
-                                address: 'Live Location'
-                            }
-                        }).catch(err => logger.log('Location update failed', err));
+                        setPartnerLocation({ latitude, longitude });
+
+                        // Update backend with new location
+                        if (partnerId && order._id) {
+                            partnerService.updateLocation(order._id, {
+                                deliveryPartnerId: partnerId,
+                                location: {
+                                    latitude,
+                                    longitude,
+                                    address: 'Live Location'
+                                }
+                            }).catch(err => logger.log('Location update failed', err));
+                        }
                     }
                 })
                 .catch(error => {
@@ -204,6 +281,7 @@ export const PartnerOrderTrackingScreen = () => {
             if (routeData) return;
 
             setIsLoading(true);
+            setNoRouteFound(false);
             try {
                 const response = await partnerService.getDirections(
                     order._id,
@@ -221,11 +299,21 @@ export const PartnerOrderTrackingScreen = () => {
                     false
                 );
 
-                if (response.routeData) {
+                // Check if no route was found
+                if (response.noRouteFound) {
+                    setNoRouteFound(true);
+                    logger.warn('No route found between locations');
+                    // Still set the fallback route data for display
+                    if (response.routeData) {
+                        setRouteData(response.routeData);
+                    }
+                } else if (response.routeData) {
                     setRouteData(response.routeData);
+                    setNoRouteFound(false);
                 }
             } catch (error) {
                 logger.error('Failed to fetch route:', error);
+                setNoRouteFound(true);
             } finally {
                 setIsLoading(false);
             }
@@ -281,6 +369,11 @@ export const PartnerOrderTrackingScreen = () => {
         } finally {
             setActionLoading(false);
         }
+    };
+
+    const handleItemPress = (item: any) => {
+        setSelectedItem(item);
+        setShowItemModal(true);
     };
 
     // Handle delivery action
@@ -345,6 +438,14 @@ export const PartnerOrderTrackingScreen = () => {
         }
     };
 
+    const getTagColor = (tag: string) => {
+        const t = tag.toLowerCase();
+        if (t.includes('cold') || t.includes('frozen')) return '#3B82F6';
+        if (t.includes('fragile')) return '#EF4444';
+        if (t.includes('heavy') || t.includes('bulky')) return '#4B5563';
+        return colors.primary;
+    };
+
     // Get action button text
     const getActionButton = () => {
         if (order.status === 'accepted') {
@@ -364,26 +465,24 @@ export const PartnerOrderTrackingScreen = () => {
     return (
         <View style={styles.container}>
             {/* Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
+                    <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2.5">
                         <Path d="M19 12H5M12 19l-7-7 7-7" />
                     </Svg>
                 </TouchableOpacity>
                 <View style={styles.headerCenter}>
-                    <MonoText size="m" weight="bold">Order #{order.orderId?.slice(-6).toUpperCase()}</MonoText>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + '20' }]}>
-                        <MonoText size="xs" weight="bold" color={getStatusColor(order.status)}>
-                            {order.deliveryStatus || order.status.toUpperCase()}
-                        </MonoText>
-                    </View>
+                    <MonoText size="s" weight="bold" color={colors.textLight}>Order Tracking</MonoText>
+                    <MonoText size="m" weight="bold">#{order.orderId?.slice(-6).toUpperCase()}</MonoText>
                 </View>
                 <TouchableOpacity onPress={openGoogleMapsNavigation} style={styles.navigateBtn}>
-                    <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2">
+                    <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2.5">
                         <Path d="M3 11l19-9-9 19-2-8-8-2z" />
                     </Svg>
                 </TouchableOpacity>
             </View>
+
+
 
             {/* Map */}
             <View style={styles.mapContainer}>
@@ -401,9 +500,8 @@ export const PartnerOrderTrackingScreen = () => {
                     }}
                 >
                     {partnerLocation && (
-                        <Marker
-                            ref={partnerMarkerRef}
-                            coordinate={partnerLocation}
+                        <Marker.Animated
+                            coordinate={partnerLocationAnimated as any}
                             title="Your Location"
                         >
                             <View style={styles.partnerMarker}>
@@ -412,7 +510,7 @@ export const PartnerOrderTrackingScreen = () => {
                                     <Path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
                                 </Svg>
                             </View>
-                        </Marker>
+                        </Marker.Animated>
                     )}
 
                     {/* Customer Location Marker */}
@@ -465,6 +563,31 @@ export const PartnerOrderTrackingScreen = () => {
                 <View style={styles.etaCard}>
                     {isLoading ? (
                         <ActivityIndicator size="small" color={colors.primary} />
+                    ) : noRouteFound ? (
+                        <>
+                            <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2">
+                                <Circle cx="12" cy="12" r="10" />
+                                <Path d="M12 8v4M12 16h.01" />
+                            </Svg>
+                            <MonoText size="xs" weight="bold" color={colors.accent} style={{ marginTop: 6, textAlign: 'center' }}>
+                                Route Unavailable
+                            </MonoText>
+                            <MonoText size="xs" color={colors.textLight} style={{ marginTop: 4, textAlign: 'center' }}>
+                                Use Maps to navigate
+                            </MonoText>
+                            <TouchableOpacity
+                                style={{
+                                    marginTop: 8,
+                                    backgroundColor: colors.primary,
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    borderRadius: 8,
+                                }}
+                                onPress={openGoogleMapsNavigation}
+                            >
+                                <MonoText size="xs" weight="bold" color={colors.white}>Open Maps</MonoText>
+                            </TouchableOpacity>
+                        </>
                     ) : (
                         <>
                             <MonoText size="xxl" weight="bold">
@@ -486,8 +609,45 @@ export const PartnerOrderTrackingScreen = () => {
             </View>
 
             {/* Bottom Details */}
-            <ScrollView style={styles.bottomSheet} contentContainerStyle={{ paddingBottom: 100 }}>
-                {/* Customer Card */}
+            <ScrollView style={styles.bottomSheet} contentContainerStyle={{ paddingBottom: 100, paddingTop: 20 }} showsVerticalScrollIndicator={false}>
+                {/* Handle Bar */}
+                <View style={styles.handle} />
+
+                {/* No Route Found Banner */}
+                {noRouteFound && (
+                    <View style={styles.noRouteBanner}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2">
+                                <Path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <Path d="M12 9v4M12 17h.01" />
+                            </Svg>
+                            <MonoText weight="bold" color="#92400E" style={{ marginLeft: 8 }}>Route Not Available</MonoText>
+                        </View>
+                        <MonoText size="xs" color="#78350F">
+                            Google Maps couldn't find a route to this location. Please use external navigation for directions.
+                        </MonoText>
+                        <TouchableOpacity
+                            style={{
+                                marginTop: 12,
+                                backgroundColor: '#1F2937',
+                                paddingVertical: 10,
+                                paddingHorizontal: 16,
+                                borderRadius: 8,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                            }}
+                            onPress={openGoogleMapsNavigation}
+                        >
+                            <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                                <Path d="M3 11l19-9-9 19-2-8-8-2z" />
+                            </Svg>
+                            <MonoText size="s" weight="bold" color={colors.white} style={{ marginLeft: 8 }}>Open Google Maps</MonoText>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+                {/* Delivery details */}
                 <View style={styles.customerCard}>
                     <View style={styles.customerAvatar}>
                         <MonoText size="l" weight="bold" color={colors.white}>
@@ -496,149 +656,217 @@ export const PartnerOrderTrackingScreen = () => {
                     </View>
                     <View style={styles.customerInfo}>
                         <MonoText weight="bold" size="m">{order.customer?.name || 'Customer'}</MonoText>
-                        <MonoText size="xs" color={colors.textLight} numberOfLines={2}>
+                        <MonoText size="s" color={colors.text} numberOfLines={3} style={{ marginTop: 2 }}>
                             {customerLocation?.address || 'Delivery Address'}
                         </MonoText>
-                    </View>
-                    {order.customer?.phone && (
-                        <TouchableOpacity
-                            style={styles.callBtn}
-                            onPress={() => Linking.openURL(`tel:${order.customer?.phone}`)}
-                        >
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.success} strokeWidth="2">
-                                <Path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                            </Svg>
-                        </TouchableOpacity>
-                    )}
-                </View>
-
-                {/* Order Items - Detailed Bill */}
-                <View style={styles.section}>
-                    <MonoText weight="bold" style={{ marginBottom: spacing.s }}>Bill Details</MonoText>
-                    <View style={styles.itemsCard}>
-                        {(() => {
-                            let totalSavings = 0;
-                            const itemsList = order.items?.map((item: any, index: number) => {
-                                const product = item.id;
-                                const originalPrice = product?.price || 0;
-                                const discountPrice = product?.discountPrice;
-                                const finalPrice = discountPrice || originalPrice || (order.totalPrice / (order.items?.length || 1));
-                                const quantity = item.count || 1;
-                                const itemTotal = finalPrice * quantity;
-
-                                if (discountPrice && discountPrice < originalPrice) {
-                                    totalSavings += (originalPrice - discountPrice) * quantity;
-                                }
-
-                                return (
-                                    <View key={index} style={styles.itemRow}>
-                                        <View style={styles.itemQty}>
-                                            <MonoText size="xs" weight="bold" color={colors.white}>
-                                                {item.count}x
-                                            </MonoText>
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <MonoText numberOfLines={1}>
-                                                {item.item || product?.name || 'Product'}
-                                            </MonoText>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                                {discountPrice && discountPrice < originalPrice && (
-                                                    <MonoText size="xs" color={colors.textLight} style={{ textDecorationLine: 'line-through', marginRight: 4 }}>
-                                                        ₹{originalPrice}
-                                                    </MonoText>
-                                                )}
-                                                <MonoText size="xs" color={colors.textLight}>
-                                                    ₹{finalPrice} × {quantity}
-                                                </MonoText>
-                                            </View>
-                                        </View>
-                                        <MonoText weight="bold">₹{itemTotal}</MonoText>
-                                    </View>
-                                );
-                            });
-
-                            return (
-                                <>
-                                    {itemsList}
-                                    <View style={styles.divider} />
-                                    {totalSavings > 0 && (
-                                        <View style={[styles.totalRow, { marginBottom: 4 }]}>
-                                            <MonoText size="s" color={colors.success}>Total Savings</MonoText>
-                                            <MonoText size="s" color={colors.success}>-₹{totalSavings}</MonoText>
-                                        </View>
-                                    )}
-                                </>
-                            );
-                        })()}
-                        <View style={styles.totalRow}>
-                            <MonoText size="s" color={colors.textLight}>Subtotal</MonoText>
-                            <MonoText size="s">₹{(order.totalPrice || 0) - ((order as any).deliveryFee || 0)}</MonoText>
-                        </View>
-                        <View style={[styles.totalRow, { marginTop: 4 }]}>
-                            <MonoText size="s" color={colors.textLight}>Delivery Fee</MonoText>
-                            <MonoText size="s">{(order as any).deliveryFee === 0 ? 'FREE' : `₹${(order as any).deliveryFee || 0}`}</MonoText>
-                        </View>
-                        <View style={[styles.totalRow, { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border }]}>
-                            <MonoText weight="bold">Grand Total</MonoText>
-                            <MonoText size="l" weight="bold" color={colors.primary}>
-                                ₹{order.totalPrice}
-                            </MonoText>
-                        </View>
-                    </View>
-                </View>
-
-                {/* Payment Info */}
-                <View style={[
-                    styles.paymentCard,
-                    { backgroundColor: (order as any).paymentStatus === 'verified' ? '#D1FAE5' : '#FEF3C7' }
-                ]}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <View>
-                            <MonoText size="xs" color={colors.textLight}>Payment Status</MonoText>
-                            <MonoText weight="bold" color={(order as any).paymentStatus === 'verified' ? '#065F46' : '#92400E'}>
-                                {(order as any).paymentStatus === 'verified' || (order as any).paymentStatus === 'paid'
-                                    ? '✓ Paid Online'
-                                    : (order as any).paymentDetails?.paymentMethod === 'cod' ? 'Cash on Delivery' : 'COD'}
-                            </MonoText>
-                        </View>
-                        {((order as any).paymentDetails?.paymentMethod === 'cod' && (order as any).paymentStatus !== 'verified') && (
-                            <View style={{ backgroundColor: '#92400E', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
-                                <MonoText size="xs" color={colors.white} weight="bold">
-                                    COLLECT ₹{order.totalPrice}
-                                </MonoText>
+                        {order.deliveryLocation?.directions && (
+                            <View style={styles.instructionBadge}>
+                                <MonoText size="xxs" color={colors.primary} weight="bold">INS: {order.deliveryLocation.directions}</MonoText>
                             </View>
                         )}
                     </View>
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <TouchableOpacity
+                            style={styles.callBtn}
+                            onPress={() => Linking.openURL(`tel:${order.deliveryLocation?.receiverPhone || order.customer?.phone}`)}
+                        >
+                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.success} strokeWidth="2.5">
+                                <Path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                            </Svg>
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
-                {/* Download Invoice Button */}
-                <TouchableOpacity
-                    style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: colors.black,
-                        paddingVertical: 14,
-                        borderRadius: 12,
-                        marginBottom: spacing.m
-                    }}
-                    onPress={async () => {
-                        try {
-                            const invoiceData = invoiceService.createInvoiceFromOrder(order);
-                            await invoiceService.generateAndShareInvoice(invoiceData);
-                        } catch (err) {
-                            logger.error('Invoice error:', err);
-                        }
-                    }}
-                >
-                    <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 8 }}>
-                        <Path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <Path d="M14 2v6h6" />
-                        <Path d="M12 18v-6" />
-                        <Path d="M9 15l3 3 3-3" />
-                    </Svg>
-                    <MonoText color={colors.white} weight="bold">Download Invoice</MonoText>
-                </TouchableOpacity>
+                {/* Receiver Info Section */}
+                <View style={[styles.section, { marginTop: 0 }]}>
+                    <View style={styles.receiverCard}>
+                        <View style={styles.receiverIcon}>
+                            <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2.5">
+                                <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                <Circle cx="12" cy="7" r="4" />
+                            </Svg>
+                        </View>
+                        <View style={styles.receiverDetails}>
+                            <MonoText size="xs" color={colors.textLight} weight="bold">RECEIVER DETAILS</MonoText>
+                            <MonoText size="s" weight="bold" style={{ marginTop: 2 }}>
+                                {order.deliveryLocation?.receiverName || order.customer?.name} • {order.deliveryLocation?.receiverPhone || order.customer?.phone}
+                            </MonoText>
+                        </View>
+                    </View>
+
+                    {order.deliveryLocation?.directions && (
+                        <View style={styles.directionsCard}>
+                            <View style={styles.directionsIcon}>
+                                <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.warning} strokeWidth="2.5">
+                                    <Path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                                </Svg>
+                            </View>
+                            <View style={styles.receiverDetails}>
+                                <MonoText size="xs" color={colors.textLight} weight="bold">DELIVERY DIRECTIONS</MonoText>
+                                <MonoText size="s" style={{ marginTop: 2 }}>{order.deliveryLocation.directions}</MonoText>
+                            </View>
+                        </View>
+                    )}
+                </View>
+
+                {/* Pickup List (Zepto/Instamart Style) */}
+                <View style={styles.section}>
+                    <View style={styles.sectionHeaderRow}>
+                        <MonoText weight="bold" size="m">Pickup List</MonoText>
+                        <View style={styles.itemCountBadge}>
+                            <MonoText size="xs" weight="bold" color={colors.primary}>{order.items?.length || 0} ITEMS</MonoText>
+                        </View>
+                    </View>
+
+                    <View style={styles.itemsListContainer}>
+                        {order.items?.map((item: any, index: number) => {
+                            const hasVariantImage = item.productImage && item.productImage.trim() !== '';
+                            const instructions = item.deliveryInstructions || [];
+
+                            return (
+                                <TouchableOpacity
+                                    key={index}
+                                    style={styles.pickupItemCard}
+                                    onPress={() => handleItemPress(item)}
+                                    activeOpacity={0.7}
+                                >
+                                    <View style={styles.itemImageContainer}>
+                                        {hasVariantImage ? (
+                                            <View style={styles.placeholderImage}>
+                                                <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.border} strokeWidth="1.5">
+                                                    <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                                    <Circle cx="12" cy="7" r="4" />
+                                                </Svg>
+                                            </View>
+                                        ) : (
+                                            <View style={styles.placeholderImage}>
+                                                <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.border} strokeWidth="1.5">
+                                                    <Path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                                                </Svg>
+                                            </View>
+                                        )}
+                                        <View style={styles.itemQtyBadge}>
+                                            <MonoText size="xxs" weight="bold" color={colors.white}>×{item.count || item.quantity}</MonoText>
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.itemInfo}>
+                                        <MonoText size="s" weight="bold" numberOfLines={1}>{item.productName || item.item}</MonoText>
+                                        <MonoText size="xxs" color={colors.textLight}>{item.packSize || 'Standard variant'}</MonoText>
+
+                                        <View style={styles.tagContainer}>
+                                            {item.handling?.cold && (
+                                                <View style={[styles.tag, { backgroundColor: '#3B82F6' }]}>
+                                                    <MonoText size="xxs" weight="bold" color={colors.white}>COLD</MonoText>
+                                                </View>
+                                            )}
+                                            {item.handling?.fragile && (
+                                                <View style={[styles.tag, { backgroundColor: '#EF4444' }]}>
+                                                    <MonoText size="xxs" weight="bold" color={colors.white}>FRAGILE</MonoText>
+                                                </View>
+                                            )}
+                                            {item.handling?.heavy && (
+                                                <View style={[styles.tag, { backgroundColor: '#4B5563' }]}>
+                                                    <MonoText size="xxs" weight="bold" color={colors.white}>HEAVY</MonoText>
+                                                </View>
+                                            )}
+                                            {item.deliveryInstructions?.map((ins: string, tid: number) => (
+                                                <View key={tid} style={[styles.tag, { backgroundColor: colors.primary }]}>
+                                                    <MonoText size="xxs" weight="bold" color={colors.white}>{ins.toUpperCase()}</MonoText>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    </View>
+                                    <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.border} strokeWidth="2">
+                                        <Path d="M9 18l6-6-6-6" />
+                                    </Svg>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                </View>
+
+                {/* Payment Info (Enhanced COD Handling) */}
+                <View style={styles.section}>
+                    <MonoText weight="bold" size="m" style={{ marginBottom: 12 }}>Payment Info</MonoText>
+                    <View style={styles.paymentCardMinimal}>
+                        <View style={styles.paymentRow}>
+                            <MonoText size="s" color={colors.textLight}>Payment Method</MonoText>
+                            <MonoText size="s" weight="bold">{order.paymentDetails?.paymentMethod?.toUpperCase() || 'ONLINE'}</MonoText>
+                        </View>
+
+                        {order.paymentDetails?.paymentMethod === 'cod' ? (
+                            <>
+                                <View style={[styles.paymentRow, { marginTop: 8 }]}>
+                                    <MonoText size="s" color={colors.textLight}>Cash to Collect</MonoText>
+                                    <MonoText size="m" weight="bold" color={colors.warning}>₹{order.totalPrice}</MonoText>
+                                </View>
+                                <View style={[styles.paymentRow, { marginTop: 8 }]}>
+                                    <MonoText size="s" color={colors.textLight}>Payment Status</MonoText>
+                                    <View style={[styles.statusBadgeSmall, { backgroundColor: order.paymentStatus === 'verified' ? `${colors.success}15` : `${colors.warning}15` }]}>
+                                        <MonoText size="xxs" weight="bold" color={order.paymentStatus === 'verified' ? colors.success : colors.warning}>
+                                            {order.paymentStatus === 'verified' ? 'COLLECTED & VERIFIED' : 'PENDING COLLECTION'}
+                                        </MonoText>
+                                    </View>
+                                </View>
+                            </>
+                        ) : (
+                            <View style={[styles.paymentRow, { marginTop: 8 }]}>
+                                <MonoText size="s" color={colors.textLight}>Payment Status</MonoText>
+                                <View style={[styles.statusBadgeSmall, { backgroundColor: `${colors.success}15` }]}>
+                                    <MonoText size="xxs" weight="bold" color={colors.success}>PAID ONLINE</MonoText>
+                                </View>
+                            </View>
+                        )}
+                    </View>
+
+                    {/* Collect Cash Button - COD Specific */}
+                    {order.paymentDetails?.paymentMethod === 'cod' && order.status === 'delivered' && order.paymentStatus !== 'verified' && (
+                        <TouchableOpacity
+                            style={styles.collectCashBtn}
+                            onPress={() => {
+                                Alert.alert(
+                                    'Collect Cash',
+                                    `Are you sure you have collected ₹${order.totalPrice} from the customer?`,
+                                    [
+                                        { text: 'Cancel', style: 'cancel' },
+                                        {
+                                            text: 'Yes, Collected',
+                                            onPress: async () => {
+                                                setActionLoading(true);
+                                                try {
+                                                    const res = await partnerService.verifyCashPayment(order._id);
+                                                    if (res.message) {
+                                                        Alert.alert('Success', 'Payment verified successfully');
+                                                        // Refresh order
+                                                        const fresh = await partnerService.getOrderById(order._id);
+                                                        if (fresh.order) setOrder(fresh.order);
+                                                    }
+                                                } catch (err) {
+                                                    Alert.alert('Error', 'Failed to verify payment');
+                                                } finally {
+                                                    setActionLoading(false);
+                                                }
+                                            }
+                                        }
+                                    ]
+                                );
+                            }}
+                            disabled={actionLoading}
+                        >
+                            {actionLoading ? (
+                                <ActivityIndicator color={colors.white} size="small" />
+                            ) : (
+                                <>
+                                    <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2.5">
+                                        <Path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                                    </Svg>
+                                    <MonoText weight="bold" color={colors.white} style={{ marginLeft: 8 }}>COLLECT CASH - ₹{order.totalPrice}</MonoText>
+                                </>
+                            )}
+                        </TouchableOpacity>
+                    )}
+                </View>
             </ScrollView>
 
             {/* Action Button */}
@@ -664,6 +892,81 @@ export const PartnerOrderTrackingScreen = () => {
                 </View>
             )}
 
+            {/* Item Detail Modal */}
+            <Modal
+                isVisible={showItemModal}
+                onBackdropPress={() => setShowItemModal(false)}
+                onSwipeComplete={() => setShowItemModal(false)}
+                swipeDirection={['down']}
+                style={styles.modal}
+                propagateSwipe={true}
+                statusBarTranslucent={true}
+            >
+                <View style={styles.modalContent}>
+                    <View style={styles.modalHandle} />
+
+                    {selectedItem && (
+                        <View style={styles.modalBody}>
+                            <View style={styles.modalImageContainer}>
+                                {selectedItem.productImage ? (
+                                    <View style={[styles.placeholderImage, { transform: [{ scale: 1.5 }] }]}>
+                                        <Svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={colors.border} strokeWidth="1">
+                                            <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                            <Circle cx="12" cy="7" r="4" />
+                                        </Svg>
+                                    </View>
+                                ) : (
+                                    <View style={[styles.placeholderImage, { transform: [{ scale: 1.5 }] }]}>
+                                        <Svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={colors.border} strokeWidth="1">
+                                            <Path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                                        </Svg>
+                                    </View>
+                                )}
+                            </View>
+
+                            <View style={styles.modalInfo}>
+                                <MonoText size="xl" weight="bold">{selectedItem.productName || selectedItem.item}</MonoText>
+                                <MonoText size="m" color={colors.textLight} style={{ marginTop: 4 }}>
+                                    Variant: {selectedItem.packSize || 'Standard Pack'}
+                                </MonoText>
+
+                                <View style={styles.modalDivider} />
+
+                                <View style={styles.modalDetailRow}>
+                                    <View style={styles.modalDetailItem}>
+                                        <MonoText size="xs" color={colors.textLight} weight="bold">QUANTITY</MonoText>
+                                        <MonoText size="l" weight="bold" style={{ marginTop: 4 }}>{selectedItem.count || selectedItem.quantity} Units</MonoText>
+                                    </View>
+                                    <View style={styles.modalDetailItem}>
+                                        <MonoText size="xs" color={colors.textLight} weight="bold">SKU</MonoText>
+                                        <MonoText size="s" style={{ marginTop: 4 }}>{selectedItem.variantSku || 'N/A'}</MonoText>
+                                    </View>
+                                </View>
+
+                                {selectedItem.deliveryInstructions?.length > 0 && (
+                                    <View style={styles.modalInstructionsSection}>
+                                        <MonoText size="xs" color={colors.primary} weight="bold" style={{ marginBottom: 12 }}>ITEM INSTRUCTIONS</MonoText>
+                                        {selectedItem.deliveryInstructions.map((ins: string, idx: number) => (
+                                            <View key={idx} style={styles.modalInstructionItem}>
+                                                <View style={[styles.statusDot, { backgroundColor: getTagColor(ins) }]} />
+                                                <MonoText size="s" weight="bold" color={colors.text}>{ins.toUpperCase()}</MonoText>
+                                            </View>
+                                        ))}
+                                    </View>
+                                )}
+                            </View>
+
+                            <TouchableOpacity
+                                style={styles.modalCloseBtn}
+                                onPress={() => setShowItemModal(false)}
+                            >
+                                <MonoText size="m" weight="bold" color={colors.white}>Got it</MonoText>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+                </View>
+            </Modal>
+
             {/* Location Permission Modal */}
             <LocationPermissionModal
                 visible={showLocationModal}
@@ -688,11 +991,13 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: spacing.m,
-        paddingTop: Platform.OS === 'android' ? 40 : 50,
-        paddingBottom: spacing.m,
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        paddingHorizontal: spacing.l,
+        paddingBottom: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.05)',
     },
+
     backBtn: {
         width: 40,
         height: 40,
@@ -798,8 +1103,27 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         marginTop: -20,
-        paddingHorizontal: spacing.m,
-        paddingTop: spacing.l,
+        paddingHorizontal: spacing.l,
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+        elevation: 10,
+    },
+    handle: {
+        width: 40,
+        height: 4,
+        backgroundColor: '#E5E7EB',
+        borderRadius: 2,
+        alignSelf: 'center',
+        marginBottom: 20,
+    },
+    noRouteBanner: {
+        backgroundColor: '#FEF3C7',
+        padding: spacing.m,
+        borderRadius: 12,
+        marginBottom: spacing.m,
+        borderWidth: 1,
+        borderColor: '#FDE68A',
     },
     customerCard: {
         flexDirection: 'row',
@@ -830,6 +1154,63 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderWidth: 1,
         borderColor: colors.success,
+    },
+    receiverCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F1F5F9',
+        padding: 12,
+        borderRadius: 12,
+        marginBottom: 10,
+    },
+    receiverIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255, 71, 0, 0.1)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    receiverDetails: {
+        flex: 1,
+    },
+    directionsCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: '#FFFBEB',
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#FEF3C7',
+    },
+    directionsIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#FEF3C7',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    statusBadgeSmall: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+    },
+    collectCashBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.warning,
+        paddingVertical: 14,
+        borderRadius: 14,
+        marginTop: 16,
+        shadowColor: colors.warning,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 4,
     },
     section: {
         marginBottom: spacing.m,
@@ -863,11 +1244,101 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
     },
-    paymentCard: {
-        backgroundColor: '#FEF3C7',
+    paymentCardMinimal: {
+        backgroundColor: '#F8FAFC',
         padding: spacing.m,
-        borderRadius: 12,
+        borderRadius: 16,
         marginBottom: spacing.m,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.05)',
+    },
+    paymentRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    pickupItemCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 12,
+        backgroundColor: colors.white,
+        borderRadius: 16,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.03)',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.05,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 2,
+            },
+        }),
+    },
+    itemImageContainer: {
+        width: 60,
+        height: 60,
+        borderRadius: 12,
+        backgroundColor: '#F1F5F9',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    placeholderImage: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    itemInfo: {
+        flex: 1,
+    },
+    itemQtyBadge: {
+        position: 'absolute',
+        top: -5,
+        right: -5,
+        backgroundColor: colors.primary,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 8,
+        borderWidth: 2,
+        borderColor: colors.white,
+    },
+    tagContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        marginTop: 6,
+        gap: 6,
+    },
+    tag: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    sectionHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    itemCountBadge: {
+        backgroundColor: 'rgba(255, 71, 0, 0.1)',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 8,
+    },
+    itemsListContainer: {
+        marginBottom: 8,
+    },
+    instructionBadge: {
+        marginTop: 8,
+        backgroundColor: 'rgba(255, 71, 0, 0.05)',
+        padding: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 71, 0, 0.1)',
+        borderStyle: 'dashed',
     },
     actionContainer: {
         position: 'absolute',
@@ -887,5 +1358,82 @@ const styles = StyleSheet.create({
     },
     actionButtonDisabled: {
         opacity: 0.6,
+    },
+    modal: {
+        margin: 0,
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        backgroundColor: colors.white,
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        paddingTop: 12,
+        paddingBottom: Platform.OS === 'ios' ? 40 : 40,
+        paddingHorizontal: spacing.l,
+    },
+    modalHandle: {
+        width: 40,
+        height: 4,
+        backgroundColor: '#E5E7EB',
+        borderRadius: 2,
+        alignSelf: 'center',
+        marginBottom: 24,
+    },
+    modalBody: {
+        width: '100%',
+    },
+    modalImageContainer: {
+        width: '100%',
+        height: 180,
+        borderRadius: 20,
+        backgroundColor: '#F8FAFC',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 20,
+    },
+    modalInfo: {
+        marginBottom: 24,
+    },
+    modalDivider: {
+        height: 1,
+        backgroundColor: '#F1F5F9',
+        marginVertical: 16,
+    },
+    modalDetailRow: {
+        flexDirection: 'row',
+        marginBottom: 24,
+        gap: 20,
+    },
+    modalDetailItem: {
+        flex: 1,
+    },
+    modalInstructionsSection: {
+        backgroundColor: 'rgba(255, 71, 0, 0.03)',
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 71, 0, 0.08)',
+    },
+    modalInstructionItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 10,
+        gap: 10,
+    },
+    statusDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+    },
+    modalCloseBtn: {
+        backgroundColor: colors.primary,
+        paddingVertical: 16,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: colors.primary,
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 4,
     },
 });

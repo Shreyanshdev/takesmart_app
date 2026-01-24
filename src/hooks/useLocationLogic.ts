@@ -1,143 +1,89 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Platform, Linking, Alert, PermissionsAndroid } from 'react-native';
-import GetLocation from 'react-native-get-location';
-import { userService } from '../services/customer/user.service';
-import { branchService, Branch } from '../services/customer/branch.service';
+import axios from 'axios';
+import { useBranchStore } from '../store/branch.store';
 import { ENV } from '../utils/env';
 import { logger } from '../utils/logger';
-import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+/**
+ * useLocationLogic - Thin wrapper around branch store for UI components
+ * 
+ * The branch.store.ts is the single source of truth for:
+ * - GPS permission handling
+ * - Branch fetching (GPS, pincode, coordinates)
+ * - Caching
+ * 
+ * This hook provides:
+ * - Reverse geocoding for display address
+ * - Simple interface for HomeHeader
+ */
 
 export const useLocationLogic = () => {
-    const [locationStatus, setLocationStatus] = useState<'idle' | 'granted' | 'denied' | 'disabled'>('idle');
+    const {
+        currentBranch,
+        isLoading: isFetching,
+        locationStatus,
+        requestGPSAndFetchBranch,
+        openLocationSettings,
+        initialize
+    } = useBranchStore();
+
     const [currentAddress, setCurrentAddress] = useState<string | null>(null);
-    const [nearestBranch, setNearestBranch] = useState<Branch | null>(null);
-    const [isFetching, setIsFetching] = useState(false);
 
-    // Initial permission check
+    // Initialize branch store on mount
     useEffect(() => {
-        loadCachedLocation();
+        initialize();
     }, []);
 
-    const loadCachedLocation = async () => {
-        try {
-            const cached = await AsyncStorage.getItem('user_location_data');
-            if (cached) {
-                const data = JSON.parse(cached);
-                setCurrentAddress(data.address);
-                setNearestBranch(data.branch);
-                // Even if cached, try to fetch fresh location silently
-                requestPermission(true);
-            } else {
-                requestPermission();
-            }
-        } catch (e) {
-            logger.log('Failed to load cached location');
+    // Reverse geocode when branch changes (to get display address)
+    useEffect(() => {
+        if (currentBranch?.location) {
+            reverseGeocode(currentBranch.location.latitude, currentBranch.location.longitude);
         }
-    };
+    }, [currentBranch]);
 
-    const requestPermission = useCallback(async (silent = false) => {
-        if (Platform.OS === 'android') {
-            try {
-                const granted = await PermissionsAndroid.request(
-                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-                    {
-                        title: "Location Permission",
-                        message: "LushAndPure needs your location to find the nearest branch.",
-                        buttonNeutral: "Ask Me Later",
-                        buttonNegative: "Cancel",
-                        buttonPositive: "OK"
-                    }
-                );
-                if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-                    setLocationStatus('granted');
-                    fetchCurrentLocation(silent);
-                } else {
-                    setLocationStatus('denied');
-                }
-            } catch (err) {
-                logger.warn('Location permission error:', err);
-                setLocationStatus('denied');
-            }
-        } else {
-            // iOS usually handles permission automatically on GetLocation call
-            fetchCurrentLocation(silent);
-        }
-    }, []);
-
-    const fetchCurrentLocation = (silent = false) => {
-        if (!silent) setIsFetching(true);
-
-        GetLocation.getCurrentPosition({
-            enableHighAccuracy: true,
-            timeout: 15000,
-        })
-            .then(async location => {
-                try {
-                    const { latitude, longitude } = location;
-                    // console.log('[useLocationLogic] Got Location:', latitude, longitude);
-
-                    // 1. Fetch Address (Non-blocking)
-                    let address = "Unknown Location";
-                    try {
-                        address = await reverseGeocode(latitude, longitude);
-                    } catch (addrErr) {
-                        logger.warn('[useLocationLogic] Geocoding failed:', addrErr);
-                    }
-                    setCurrentAddress(address);
-
-                    // 2. Fetch Nested Branch (Blocking/Critical)
-                    let fetchedBranch: Branch | null = null;
-                    try {
-                        const branch = await branchService.getNearestBranch(latitude, longitude);
-                        setNearestBranch(branch);
-                        fetchedBranch = branch;
-                    } catch (branchErr: any) {
-                        logger.error('[useLocationLogic] Branch fetch failed:', branchErr.message);
-                        // Silent failure for UI
-                    }
-
-                    // Cache locally
-                    const tempData = {
-                        address,
-                        branch: fetchedBranch
-                    };
-                    await AsyncStorage.setItem('user_location_data', JSON.stringify(tempData));
-
-                } finally {
-                    setIsFetching(false);
-                }
-            })
-            .catch(error => {
-                const { code, message } = error;
-                logger.warn('[useLocationLogic] Location Error:', code, message);
-                setLocationStatus('disabled');
-                setIsFetching(false);
-            });
-    };
-
-    const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+    const reverseGeocode = async (lat: number, lng: number) => {
         try {
             const response = await axios.get(
                 `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${ENV.GOOGLE_MAPS_API_KEY}`
             );
             if (response.data.results.length > 0) {
-                return response.data.results[0].formatted_address;
+                // Get a short address (locality, city)
+                const components = response.data.results[0].address_components;
+                let locality = '';
+                let city = '';
+
+                for (const comp of components) {
+                    if (comp.types.includes('locality')) {
+                        locality = comp.short_name;
+                    }
+                    if (comp.types.includes('administrative_area_level_2')) {
+                        city = comp.short_name;
+                    }
+                }
+
+                setCurrentAddress(locality || city || response.data.results[0].formatted_address);
             }
         } catch (error) {
-            logger.error('Reverse geocode error:', error);
+            logger.warn('Reverse geocode failed:', error);
+            // Use branch name as fallback
+            if (currentBranch?.name) {
+                setCurrentAddress(currentBranch.name);
+            }
         }
-        return "Unknown Location";
     };
 
-    const handleOpenSettings = () => {
-        Linking.openSettings();
-    };
+    const requestPermission = useCallback(async () => {
+        await requestGPSAndFetchBranch();
+    }, []);
+
+    const handleOpenSettings = useCallback(() => {
+        openLocationSettings();
+    }, []);
 
     return {
         locationStatus,
         currentAddress,
-        nearestBranch,
+        nearestBranch: currentBranch,
         isFetching,
         requestPermission,
         handleOpenSettings
