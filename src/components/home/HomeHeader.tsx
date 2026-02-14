@@ -57,7 +57,7 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
         const backgroundColor = interpolateColor(
             scroll.value,
             [0, 1],
-            [colors.primary, 'rgba(255, 255, 255, 0.95)'] // Slightly more opaque for better glass effect
+            [colors.primary, colors.white] // Use solid colors for efficient shadow calculation
         );
         const borderBottomLeftRadius = interpolate(scroll.value, [0, 1], [0, 0]);
         const borderBottomRightRadius = interpolate(scroll.value, [0, 1], [0, 0]);
@@ -189,7 +189,9 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
                         ) : (
                             <View style={styles.locationHeaderRow}>
                                 <MonoText size="l" weight="bold" color={colors.white} numberOfLines={1}>
-                                    {activeBranch ? `${eta} mins` : 'Welcome to TechMart'}
+                                    {!isServiceAvailable
+                                        ? 'No Service'
+                                        : (activeBranch ? `${activeBranch.distance ? `${activeBranch.distance.toFixed(1)} km` : ''} • ${eta} mins` : 'Welcome to TechMart')}
                                 </MonoText>
                                 <View style={styles.locationArrow}>
                                     <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -234,13 +236,13 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
 
                         <View style={styles.searchRightIcons}>
                             {/* Mic or Scan icon could go here if needed, keeping simple for now */}
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            {/* <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <Path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                                 <Polyline points="14 2 14 8 20 8" />
                                 <Line x1="16" y1="13" x2="8" y2="13" />
                                 <Line x1="16" y1="17" x2="8" y2="17" />
                                 <Polyline points="10 9 9 9 8 9" />
-                            </Svg>
+                            </Svg> */}
                         </View>
                     </TouchableOpacity>
 
@@ -285,7 +287,8 @@ const styles = StyleSheet.create({
         right: 0,
         zIndex: 100,
         paddingBottom: 16,
-        overflow: 'hidden', // Ensures radius clips content
+        overflow: undefined, // Removed overflow:hidden to allow shadow on iOS
+        backgroundColor: colors.white, // Explicit background for shadow efficiency warning
     },
     content: {
         zIndex: 1,

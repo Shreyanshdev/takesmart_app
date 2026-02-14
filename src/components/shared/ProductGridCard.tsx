@@ -1,23 +1,23 @@
-import React from 'react';
+import React, { memo } from 'react';
 import {
     View,
     StyleSheet,
     TouchableOpacity,
-    Image,
     Dimensions,
     Platform
 } from 'react-native';
+import FastImage from 'react-native-fast-image';
 import Svg, { Path } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { MonoText } from './MonoText';
 import { Product } from '../../services/customer/product.service';
 import { useWishlistStore } from '../../store/wishlist.store';
+import { useCartStore } from '../../store/cart.store';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
     withSpring,
     withSequence,
-    interpolateColor
 } from 'react-native-reanimated';
 
 const { width } = Dimensions.get('window');
@@ -26,7 +26,7 @@ const GRID_CARD_WIDTH = (width - 48) / 2;
 interface ProductGridCardProps {
     product: Product;
     variant: any;
-    quantity: number;
+    quantity?: number; // Optional - now read directly from cart store for reactivity
     onPress: (product: Product, variantId?: string) => void;
     onAddToCart: (product: Product, variant: any) => void;
     onRemoveFromCart: (cartItemId: string) => void;
@@ -34,10 +34,10 @@ interface ProductGridCardProps {
     isSoldOut?: boolean;
 }
 
-export const ProductGridCard: React.FC<ProductGridCardProps> = ({
+const ProductGridCardComponent: React.FC<ProductGridCardProps> = ({
     product,
     variant,
-    quantity,
+    quantity: quantityProp, // Optional prop for backwards compatibility
     onPress,
     onAddToCart,
     onRemoveFromCart,
@@ -47,7 +47,14 @@ export const ProductGridCard: React.FC<ProductGridCardProps> = ({
     const cartItemId = variant?._id || variant?.inventoryId || product._id;
     const pricing = variant?.pricing;
     const variantInfo = variant?.variant;
-    const productImage = variantInfo?.images?.[0] || product.images?.[0] || product.image;
+    const productImage = variantInfo?.images?.[0] || product.image || product.images?.[0];
+
+    // Subscribe directly to cart store for reactive quantity updates
+    // This fixes the issue where FlashList's item recycling causes stale quantity props
+    const quantity = useCartStore(state => {
+        const item = state.items.find(i => (i.product.inventoryId || i.product._id) === cartItemId);
+        return item ? item.quantity : 0;
+    });
 
     const { isInWishlist, toggleWishlist } = useWishlistStore();
     const isFavorite = isInWishlist(cartItemId);
@@ -95,13 +102,15 @@ export const ProductGridCard: React.FC<ProductGridCardProps> = ({
         return variantInfo.weightValue ? `${variantInfo.weightValue} ${variantInfo.weightUnit}` : '';
     };
 
+    const isActuallySoldOut = isSoldOut || (variant && variant.stock <= 0) || (!variant && product.stock !== undefined && product.stock <= 0);
+
     return (
         <TouchableOpacity
             key={cartItemId}
             style={[
                 styles.productCard,
                 manualWidth ? { width: manualWidth } : { width: GRID_CARD_WIDTH },
-                isSoldOut && styles.soldOutCard
+                isActuallySoldOut && styles.soldOutCard
             ]}
             onPress={() => onPress(product, variant?._id || variant?.inventoryId)}
             activeOpacity={0.9}
@@ -109,7 +118,15 @@ export const ProductGridCard: React.FC<ProductGridCardProps> = ({
             {/* Image Container with Neoglassmorphism Effect */}
             <View style={styles.imageContainer}>
                 {productImage ? (
-                    <Image source={{ uri: productImage }} style={styles.productImage} resizeMode="contain" />
+                    <FastImage
+                        source={{
+                            uri: productImage,
+                            priority: FastImage.priority.normal,
+                            cache: FastImage.cacheControl.immutable
+                        }}
+                        style={styles.productImage}
+                        resizeMode={FastImage.resizeMode.contain}
+                    />
                 ) : (
                     <View style={[styles.productImage, styles.placeholderImage]}>
                         <Svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="1.5">
@@ -141,10 +158,10 @@ export const ProductGridCard: React.FC<ProductGridCardProps> = ({
                 )}
 
                 {/* Sold Out Badge */}
-                {isSoldOut ? (
+                {isActuallySoldOut ? (
                     <View style={styles.soldOutBadge}>
-                        <MonoText size="xs" weight="bold" color="#DC2626">
-                            SOLD OUT
+                        <MonoText size="xs" weight="bold" color={colors.white}>
+                            OUT OF STOCK
                         </MonoText>
                     </View>
                 ) : (variant?.stock > 0 && variant?.stock <= 10) && (
@@ -159,12 +176,12 @@ export const ProductGridCard: React.FC<ProductGridCardProps> = ({
             {/* Product Info Section */}
             <View style={styles.infoContainer}>
                 {/* Product Name */}
-                <MonoText size="s" weight="bold" numberOfLines={2}>
+                <MonoText size="s" weight="bold" numberOfLines={2} style={isActuallySoldOut && styles.oosText}>
                     {product.name}
                 </MonoText>
 
                 {/* Rating Section - Premium Style */}
-                <View style={styles.ratingRow}>
+                <View style={[styles.ratingRow, isActuallySoldOut && styles.oosOpacity]}>
                     <Svg width="12" height="12" viewBox="0 0 24 24" fill={colors.success} stroke={colors.success}>
                         <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
                     </Svg>
@@ -207,12 +224,12 @@ export const ProductGridCard: React.FC<ProductGridCardProps> = ({
                     <View style={styles.priceColumn}>
                         {pricing && (
                             <>
-                                {hasDiscount && (
+                                {hasDiscount && !isActuallySoldOut && (
                                     <MonoText size="xxs" color={colors.textLight} style={styles.strikePrice}>
                                         ₹{pricing.mrp}
                                     </MonoText>
                                 )}
-                                <MonoText size="s" weight="bold" color={colors.text}>
+                                <MonoText size="s" weight="bold" color={isActuallySoldOut ? colors.textLight : colors.text}>
                                     ₹{pricing.sellingPrice}
                                 </MonoText>
                             </>
@@ -220,7 +237,11 @@ export const ProductGridCard: React.FC<ProductGridCardProps> = ({
                     </View>
 
                     {/* Add/Qty Button - hidden when sold out */}
-                    {!isSoldOut && (quantity > 0 ? (
+                    {isActuallySoldOut ? (
+                        <View style={styles.oosBtn}>
+                            <MonoText size="xxs" weight="bold" color={colors.textLight}>OUT OF STOCK</MonoText>
+                        </View>
+                    ) : (quantity > 0 ? (
                         <View style={styles.qtyContainer}>
                             <TouchableOpacity
                                 style={styles.qtyBtn}
@@ -259,6 +280,18 @@ export const ProductGridCard: React.FC<ProductGridCardProps> = ({
     );
 };
 
+// Optimized comparator to prevent unnecessary re-renders in grid/list
+// Note: quantity is no longer compared since it's now subscribed directly from cart store
+export const ProductGridCard = memo(ProductGridCardComponent, (prevProps, nextProps) => {
+    return (
+        prevProps.isSoldOut === nextProps.isSoldOut &&
+        prevProps.variant?.stock === nextProps.variant?.stock &&
+        prevProps.product?._id === nextProps.product?._id &&
+        prevProps.variant?._id === nextProps.variant?._id &&
+        prevProps.width === nextProps.width
+    );
+});
+
 const styles = StyleSheet.create({
     productCard: {
         marginBottom: 20,
@@ -282,6 +315,15 @@ const styles = StyleSheet.create({
     },
     soldOutCard: {
         opacity: 0.6,
+        // Disable shadow when opacity is applied to prevent "cannot calculate shadow efficiently" warning
+        ...Platform.select({
+            ios: {
+                shadowOpacity: 0,
+            },
+            android: {
+                elevation: 0,
+            },
+        }),
     },
     imageContainer: {
         width: '100%',
@@ -299,6 +341,7 @@ const styles = StyleSheet.create({
         height: 28,
         alignItems: 'center',
         justifyContent: 'center',
+        zIndex: 10,
     },
     productImage: {
         width: '100%',
@@ -317,6 +360,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 6,
+        zIndex: 10,
     },
     infoContainer: {
         padding: 8,
@@ -384,16 +428,32 @@ const styles = StyleSheet.create({
         textDecorationLine: 'line-through',
         fontSize: 10,
     },
+    oosBtn: {
+        width: 84,
+        height: 32,
+        backgroundColor: colors.border,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: 0.8,
+    },
+    oosText: {
+        color: colors.textLight,
+    },
+    oosOpacity: {
+        opacity: 0.5,
+    },
     soldOutBadge: {
         position: 'absolute',
         top: 8,
         right: 8,
-        backgroundColor: '#FEE2E2',
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        backgroundColor: '#64748B',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
         borderRadius: 6,
         borderWidth: 1,
-        borderColor: '#FECACA',
+        borderColor: '#475569',
+        zIndex: 10,
     },
     lowStockBadge: {
         position: 'absolute',
@@ -405,6 +465,6 @@ const styles = StyleSheet.create({
         borderRadius: 6,
         borderWidth: 1,
         borderColor: '#FECACA',
-        zIndex: 1,
+        zIndex: 10,
     },
 });

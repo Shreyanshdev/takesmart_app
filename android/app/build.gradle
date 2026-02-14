@@ -102,6 +102,9 @@ android {
             signingConfig signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            
+            // Add matchingFallbacks for dependencies that might not have a release variant
+            matchingFallbacks = ['debug']
         }
     }
 }

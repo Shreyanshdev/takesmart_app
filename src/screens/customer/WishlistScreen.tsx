@@ -3,11 +3,11 @@ import {
     View,
     StyleSheet,
     TouchableOpacity,
-    FlatList,
     StatusBar,
     Dimensions,
     ActivityIndicator
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { BlurView } from '@react-native-community/blur';
@@ -50,31 +50,15 @@ export const WishlistScreen = () => {
         fetchWishlist();
     }, [currentBranch?._id]);
 
-    const flattenedWishlist = React.useMemo(() => {
-        const flattened: any[] = [];
-        wishlist.forEach(product => {
-            const variants = product.variants || [];
-            if (variants.length === 0) {
-                flattened.push({ ...product, _displayVariant: null });
-            } else {
-                // For wishlist, we might just want to show the first variant or all?
-                // The Browse screen shows all. Let's show all variants of a wishlisted product
-                // to match the "exactly same as browse screen" requirement.
-                variants.forEach((variant: any) => {
-                    flattened.push({ ...product, _displayVariant: variant });
-                });
-            }
-        });
-        return flattened;
-    }, [wishlist]);
+    // Wishlist products are now pre-flattened from API (each has embedded variant data)
 
-    const handleProductPress = (product: Product, variantId?: string) => {
+    const handleProductPress = React.useCallback((product: Product, variantId?: string) => {
         setSelectedProduct(product);
         setSelectedVariantId(variantId);
         setModalVisible(true);
-    };
+    }, []);
 
-    const handleAddToCart = (product: Product, variant: any) => {
+    const handleAddToCart = React.useCallback((product: Product, variant: any) => {
         const cartItemId = variant?._id || variant?.inventoryId || product._id;
         const productImage = variant?.variant?.images?.[0] || product.images?.[0] || product.image;
 
@@ -83,6 +67,7 @@ export const WishlistScreen = () => {
             _id: cartItemId,
             name: product.name,
             image: productImage || '',
+            images: productImage ? [productImage] : (product.images || []),
             price: variant?.pricing?.mrp || 0,
             discountPrice: variant?.pricing?.sellingPrice || 0,
             stock: variant?.stock || 0,
@@ -92,7 +77,7 @@ export const WishlistScreen = () => {
             } : undefined,
             formattedQuantity: variant?.variant ? `${variant.variant.weightValue} ${variant.variant.weightUnit}` : undefined
         } as any);
-        
+
         if (!success) {
             const currentQuantity = getItemQuantity(cartItemId);
             if (currentQuantity >= (variant?.stock || 0)) {
@@ -101,26 +86,40 @@ export const WishlistScreen = () => {
                 showToast('Product is out of stock!');
             }
         }
-    };
+    }, [addToCart, getItemQuantity, showToast]);
 
-    const renderProductCard = ({ item }: { item: any }) => {
-        const variant = item._displayVariant;
+    const renderProductCard = React.useCallback(({ item }: { item: any }) => {
+        // Products now have embedded variant/pricing/stock data from API
+        const variantData = {
+            _id: item.inventoryId,
+            inventoryId: item.inventoryId,
+            variant: item.variant,
+            pricing: item.pricing,
+            stock: item.stock,
+            isAvailable: item.isAvailable
+        };
+        // Use inventoryId for cart lookup (each variant has unique inventoryId)
+        const cartItemId = item.inventoryId || item._id;
 
         return (
-            <ProductGridCard
-                product={item}
-                variant={variant}
-                quantity={getItemQuantity(variant?._id || variant?.inventoryId || item._id)}
-                width={CARD_WIDTH}
-                onPress={handleProductPress}
-                onAddToCart={handleAddToCart}
-                onRemoveFromCart={removeFromCart}
-            />
+            <View style={{ marginHorizontal: 6 }}>
+                <ProductGridCard
+                    product={item}
+                    variant={variantData}
+                    quantity={getItemQuantity(cartItemId)}
+                    width={CARD_WIDTH}
+                    onPress={handleProductPress}
+                    onAddToCart={handleAddToCart}
+                    onRemoveFromCart={removeFromCart}
+                />
+            </View>
         );
-    };
+    }, [items, getItemQuantity, handleProductPress, handleAddToCart, removeFromCart]);
 
     const totalItemsCount = items.reduce((sum, item) => sum + item.quantity, 0);
     const cartTotal = getTotalPrice();
+
+    const FlashListOptimized = FlashList as any;
 
     return (
         <View style={styles.container}>
@@ -156,35 +155,41 @@ export const WishlistScreen = () => {
                     </View>
                 </View>
             ) : (
-                <FlatList
-                    data={flattenedWishlist}
-                    keyExtractor={(item, index) => `${item._id}_${item._displayVariant?._id || index}`}
-                    numColumns={2}
-                    contentContainerStyle={[
-                        styles.listContent,
-                        { paddingBottom: totalItemsCount > 0 ? 120 : 40 }
-                    ]}
-                    columnWrapperStyle={styles.columnWrapper}
-                    renderItem={renderProductCard}
-                    showsVerticalScrollIndicator={false}
-                    ListEmptyComponent={
-                        <Animated.View entering={FadeInUp} style={styles.emptyContainer}>
-                            <Svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="1" opacity={0.5}>
-                                <Path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                            </Svg>
-                            <MonoText size="l" weight="bold" color={colors.textLight} style={{ marginTop: 24 }}>
-                                No products in wishlist yet
-                            </MonoText>
-                            <TouchableOpacity
-                                style={styles.browseBtn}
-                                onPress={() => navigation.navigate('Home')}
-                            >
-                                <MonoText size="s" weight="bold" color={colors.white}>Start Shopping</MonoText>
-                            </TouchableOpacity>
-                        </Animated.View>
-                    }
-                    ListFooterComponent={<View style={{ height: 40 }} />}
-                />
+                <View style={{ flex: 1, paddingHorizontal: 6 }}>
+                    <FlashListOptimized
+                        data={wishlist}
+                        keyExtractor={(item: any, index: number) => `${item._id}_${item.inventoryId || index}`}
+                        numColumns={2}
+                        contentContainerStyle={[
+                            styles.listContent,
+                            {
+                                paddingBottom: totalItemsCount > 0 ? 120 : 40,
+                                // paddingTop: insets.top + 60 + 12 // Moved to ListHeaderComponent
+                            }
+                        ]}
+                        renderItem={renderProductCard}
+                        showsVerticalScrollIndicator={false}
+                        estimatedItemSize={280}
+                        ListHeaderComponent={<View style={{ height: insets.top + 60 + 12 }} />}
+                        ListEmptyComponent={
+                            <Animated.View entering={FadeInUp} style={styles.emptyContainer}>
+                                <Svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="1" opacity={0.5}>
+                                    <Path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                                </Svg>
+                                <MonoText size="l" weight="bold" color={colors.textLight} style={{ marginTop: 24 }}>
+                                    No products in wishlist yet
+                                </MonoText>
+                                <TouchableOpacity
+                                    style={styles.browseBtn}
+                                    onPress={() => navigation.navigate('Home')}
+                                >
+                                    <MonoText size="s" weight="bold" color={colors.white}>Start Shopping</MonoText>
+                                </TouchableOpacity>
+                            </Animated.View>
+                        }
+                        ListFooterComponent={<View style={{ height: 40 }} />}
+                    />
+                </View>
             )}
 
             {/* Integrated Floating Cart */}
@@ -239,9 +244,8 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     listContent: {
-        paddingTop: 120,
-        paddingHorizontal: 12,
-        flexGrow: 1,
+        // paddingTop: 120, // Removed fixed padding, now dynamic
+        // paddingHorizontal: 6, // Moved to parent container
     },
     columnWrapper: {
         justifyContent: 'space-between',

@@ -18,7 +18,7 @@ configurePushNotifications((data) => {
     NavigationService.navigate('PartnerTabs', { screen: 'PartnerHome' });
   } else if (['order_picked_up', 'order_delivered', 'order_accepted', 'order_confirmed'].includes(data.type)) {
     NavigationService.navigate('OrderTracking', { orderId: data.orderId });
-  } 
+  }
 });
 
 const App = () => {

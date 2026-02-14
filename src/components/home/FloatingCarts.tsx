@@ -43,7 +43,7 @@ export const FloatingCarts: React.FC<FloatingCartsProps> = ({
     const cartImages = [...cartItems]
         .reverse()
         .slice(0, 3)
-        .map(item => item.product.images?.[0])
+        .map(item => item.product.image || item.product.images?.[0])
         .filter(img => !!img);
 
     // Animation values

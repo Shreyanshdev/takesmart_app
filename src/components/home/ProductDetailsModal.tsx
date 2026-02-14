@@ -10,7 +10,8 @@ import {
     FlatList,
     LayoutAnimation,
     UIManager,
-    Platform
+    Platform,
+    ActivityIndicator
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Animated, {
@@ -34,7 +35,7 @@ import { useCartStore } from '../../store/cart.store';
 import { useToastStore } from '../../store/toast.store';
 import { useAuthStore } from '../../store/authStore';
 import { useWishlistStore } from '../../store/wishlist.store';
-import { FloatingCarts } from '../home/FloatingCarts';
+import { FloatingCarts } from './FloatingCarts';
 import { SuccessToast } from '../SuccessToast';
 import { logger } from '../../utils/logger';
 
@@ -53,6 +54,7 @@ interface ProductDetailsModalProps {
 
 // Variant item type for display
 interface VariantItem {
+    _id: string;
     inventoryId: string;
     variant: InventoryVariant;
     pricing: InventoryPricing;
@@ -75,20 +77,56 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
     const INITIAL_REVIEW_LIMIT = 5;
     const LOAD_MORE_LIMIT = 5;
 
-    // Related Products
+    // Related Products Pagination
     const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
     const [brandProducts, setBrandProducts] = useState<Product[]>([]);
     const [loadingRelated, setLoadingRelated] = useState(false);
+    const [relatedPage, setRelatedPage] = useState(1);
+    const [hasNextRelated, setHasNextRelated] = useState(false);
+    const [brandPage, setBrandPage] = useState(1);
+    const [hasNextBrand, setHasNextBrand] = useState(false);
+    const [isLoadingMoreRelated, setIsLoadingMoreRelated] = useState(false);
+    const [isLoadingMoreBrand, setIsLoadingMoreBrand] = useState(false);
+
+    const INITIAL_RELATED_LIMIT = 15;
+    const LOAD_MORE_RELATED_LIMIT = 10;
 
     // Internal product state for switching products
     const [currentProduct, setCurrentProduct] = useState<Product | null>(null);
+    const [isLoadingProduct, setIsLoadingProduct] = useState(false);
 
-    // Sync currentProduct with prop when modal opens
+    // Fetch full product details when modal opens or product changes
     useEffect(() => {
-        if (visible && product) {
-            setCurrentProduct(product);
+        if (visible && product?._id) {
+            fetchFullProduct(product._id);
+        } else if (!visible) {
+            // Reset state when modal closes
+            setCurrentProduct(null);
+            setIsLoadingProduct(false);
         }
-    }, [visible, product]);
+    }, [visible, product?._id]);
+
+    const fetchFullProduct = async (productId: string) => {
+        setIsLoadingProduct(true);
+        // Set initial product from props for immediate display
+        setCurrentProduct(product);
+
+        try {
+            // Fetch full product details with branch-specific inventory
+            const branchId = useBranchStore.getState().currentBranch?._id;
+            const fullProduct = await productService.getProductById(productId, branchId);
+
+            if (fullProduct) {
+                logger.log('Full product loaded:', fullProduct.name, 'variants:', (fullProduct as any).variants?.length || 0);
+                setCurrentProduct(fullProduct);
+            }
+        } catch (err) {
+            logger.error('Failed to fetch full product details:', err);
+            // Keep using prop data as fallback
+        } finally {
+            setIsLoadingProduct(false);
+        }
+    };
 
     // Review Filters
     const [filterRating, setFilterRating] = useState<number | null>(null);
@@ -128,19 +166,102 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
     const fetchRelatedProducts = async () => {
         if (!currentProduct) return;
         setLoadingRelated(true);
+        setRelatedPage(1);
+        setBrandPage(1);
+
+        // Reset products only if we have a valid brand/section to show skeletons for
+        setRelatedProducts([]);
+        setBrandProducts([]);
+
         try {
-            const [related, brandResults] = await Promise.all([
-                productService.getRelatedProducts(currentProduct._id, branchId, 8),
+            const [relatedRes, brandRes] = await Promise.all([
+                productService.getRelatedProducts(currentProduct._id, branchId, 1, INITIAL_RELATED_LIMIT),
                 currentProduct.brand
-                    ? productService.getProductsByBrand(currentProduct.brand, branchId, 1, 8)
-                    : Promise.resolve({ products: [] })
+                    ? productService.getProductsByBrand(currentProduct.brand, branchId, 1, INITIAL_RELATED_LIMIT)
+                    : Promise.resolve({ products: [], pagination: { hasNext: false } })
             ]);
-            setRelatedProducts(related);
-            setBrandProducts(brandResults.products.filter(p => p._id !== currentProduct._id));
+
+            setRelatedProducts(relatedRes.products || []);
+            setHasNextRelated(relatedRes.pagination?.hasNext || false);
+
+            if (brandRes && brandRes.products) {
+                const filteredBrand = brandRes.products.filter(p => p._id !== currentProduct._id);
+                setBrandProducts(filteredBrand);
+                setHasNextBrand(brandRes.pagination?.hasNext || false);
+            }
         } catch (err) {
             logger.error('Failed to fetch related products:', err);
         } finally {
             setLoadingRelated(false);
+        }
+    };
+
+    const loadMoreRelated = async () => {
+        if (isLoadingMoreRelated || !hasNextRelated || !currentProduct) return;
+
+        setIsLoadingMoreRelated(true);
+        const nextPage = relatedPage + 1;
+
+        try {
+            const response = await productService.getRelatedProducts(
+                currentProduct._id,
+                branchId,
+                nextPage,
+                LOAD_MORE_RELATED_LIMIT
+            );
+
+            setRelatedProducts(prev => {
+                const existingIds = new Set(prev.map(p => p.inventoryId || p._id));
+                const seenInBatch = new Set<string>();
+                const newItems = (response.products || []).filter(p => {
+                    const id = p.inventoryId || p._id;
+                    if (existingIds.has(id) || seenInBatch.has(id)) return false;
+                    seenInBatch.add(id);
+                    return true;
+                });
+                return [...prev, ...newItems];
+            });
+            setRelatedPage(nextPage);
+            setHasNextRelated(response.pagination?.hasNext || false);
+        } catch (err) {
+            logger.error('Failed to load more related products:', err);
+        } finally {
+            setIsLoadingMoreRelated(false);
+        }
+    };
+
+    const loadMoreBrand = async () => {
+        if (isLoadingMoreBrand || !hasNextBrand || !currentProduct?.brand) return;
+
+        setIsLoadingMoreBrand(true);
+        const nextPage = brandPage + 1;
+
+        try {
+            const response = await productService.getProductsByBrand(
+                currentProduct.brand,
+                branchId,
+                nextPage,
+                LOAD_MORE_RELATED_LIMIT
+            );
+
+            const filteredProducts = response.products.filter(p => p._id !== currentProduct._id);
+            setBrandProducts(prev => {
+                const existingIds = new Set(prev.map(p => p.inventoryId || p._id));
+                const seenInBatch = new Set<string>();
+                const newItems = filteredProducts.filter(p => {
+                    const id = p.inventoryId || p._id;
+                    if (existingIds.has(id) || seenInBatch.has(id)) return false;
+                    seenInBatch.add(id);
+                    return true;
+                });
+                return [...prev, ...newItems];
+            });
+            setBrandPage(nextPage);
+            setHasNextBrand(response.pagination?.hasNext || false);
+        } catch (err) {
+            logger.error('Failed to load more brand products:', err);
+        } finally {
+            setIsLoadingMoreBrand(false);
         }
     };
 
@@ -252,12 +373,14 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
 
     // Get variants array (from inventory data) or create default from product
     const variants: VariantItem[] = currentProduct ? ((currentProduct as any).variants?.map((inv: any) => ({
+        _id: inv._id || inv.inventoryId,
         inventoryId: inv._id || inv.inventoryId,
         variant: inv.variant,
         pricing: inv.pricing,
         stock: inv.stock,
         isAvailable: inv.isAvailable
     })) || ((currentProduct as any).variant && (currentProduct as any).pricing ? [{
+        _id: (currentProduct as any).inventoryId || currentProduct._id,
         inventoryId: (currentProduct as any).inventoryId || currentProduct._id,
         variant: (currentProduct as any).variant,
         pricing: (currentProduct as any).pricing,
@@ -361,8 +484,9 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
 
         const success = addToCart({
             ...currentProduct,
-            _id: currentVariant.inventoryId,
+            _id: currentVariant._id || currentVariant.inventoryId,
             image: images[0] || '',
+            images: images && images.length > 0 ? [images[0]] : (currentProduct.images || []),
             price: currentVariant.pricing.mrp,
             discountPrice: currentVariant.pricing.sellingPrice,
             quantity: {
@@ -468,33 +592,48 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                         </View>
 
                         <View style={styles.bodyContent}>
-
                             {/* Brand Name */}
-                            {currentProduct.brand && (
+                            {isLoadingProduct ? (
+                                <SkeletonItem width={80} height={12} borderRadius={4} style={{ marginBottom: 8 }} />
+                            ) : currentProduct.brand && (
                                 <MonoText size="xs" color={colors.textLight} weight="semiBold" style={{ marginBottom: 4, letterSpacing: 0.5 }}>
                                     {currentProduct.brand.toUpperCase()}
                                 </MonoText>
                             )}
 
                             {/* Product Name */}
-                            <MonoText size="xl" weight="bold" style={styles.productName}>
-                                {currentProduct.name}
-                            </MonoText>
+                            {isLoadingProduct ? (
+                                <SkeletonItem width="90%" height={24} borderRadius={4} style={{ marginBottom: 12 }} />
+                            ) : (
+                                <MonoText size="xl" weight="bold" style={styles.productName}>
+                                    {currentProduct.name}
+                                </MonoText>
+                            )}
 
                             {/* Rating Row Restoration */}
-                            <View style={styles.ratingRowMain}>
-                                <Svg width="14" height="14" viewBox="0 0 24 24" fill="#FBBF24" stroke="#FBBF24">
-                                    <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
-                                </Svg>
-                                <MonoText size="s" weight="bold" style={{ marginLeft: 6 }}>
-                                    {currentProduct.rating?.average || 4.2}
-                                </MonoText>
-                                <MonoText size="s" color={colors.textLight} style={{ marginLeft: 8 }}>
-                                    ({currentProduct.rating?.count || 120} reviews)
-                                </MonoText>
-                            </View>
+                            {isLoadingProduct ? (
+                                <SkeletonItem width={120} height={16} borderRadius={4} style={{ marginBottom: 12 }} />
+                            ) : (
+                                <View style={styles.ratingRowMain}>
+                                    <Svg width="14" height="14" viewBox="0 0 24 24" fill="#FBBF24" stroke="#FBBF24">
+                                        <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
+                                    </Svg>
+                                    <MonoText size="s" weight="bold" style={{ marginLeft: 6 }}>
+                                        {currentProduct.rating?.average || 4.2}
+                                    </MonoText>
+                                    <MonoText size="s" color={colors.textLight} style={{ marginLeft: 8 }}>
+                                        ({currentProduct.rating?.count || 120} reviews)
+                                    </MonoText>
+                                </View>
+                            )}
 
-                            {(currentVariant?.stock > 0 && currentVariant?.stock <= 10) && (
+                            {isLoadingProduct ? (
+                                <SkeletonItem width={100} height={14} borderRadius={4} style={{ marginTop: 8 }} />
+                            ) : currentVariant?.stock === 0 ? (
+                                <MonoText size="s" weight="bold" color={colors.error} style={{ marginTop: 8 }}>
+                                    Out of Stock
+                                </MonoText>
+                            ) : (currentVariant?.stock > 0 && currentVariant?.stock <= 10) && (
                                 <MonoText size="s" weight="bold" color={colors.error} style={{ marginTop: 8 }}>
                                     Only {currentVariant.stock} left
                                 </MonoText>
@@ -503,56 +642,77 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                             {/* Variant Selection */}
                             <View style={styles.variantContainer}>
                                 <MonoText size="m" weight="bold" style={styles.variantTitle}>Select Unit</MonoText>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.variantScroll}>
-                                    {variants.map((v, index) => {
-                                        const isSelected = currentVariant?.inventoryId === v.inventoryId;
-                                        const discount = getDiscountPercent(v.pricing);
+                                {isLoadingProduct ? (
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.variantScroll}>
+                                        {[1, 2, 3].map(i => (
+                                            <View key={i} style={[styles.newVariantCard, { minWidth: 100, minHeight: 90 }]}>
+                                                <SkeletonItem width="60%" height={16} borderRadius={4} style={{ marginBottom: 8 }} />
+                                                <SkeletonItem width="80%" height={14} borderRadius={4} style={{ marginBottom: 4 }} />
+                                                <SkeletonItem width="50%" height={10} borderRadius={4} />
+                                            </View>
+                                        ))}
+                                    </ScrollView>
+                                ) : (
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.variantScroll}>
+                                        {variants.map((v, index) => {
+                                            const isSelected = currentVariant?.inventoryId === v.inventoryId;
+                                            const discount = getDiscountPercent(v.pricing);
 
-                                        return (
-                                            <TouchableOpacity
-                                                key={v.inventoryId || index}
-                                                style={[
-                                                    styles.newVariantCard,
-                                                    isSelected && styles.newVariantCardSelected
-                                                ]}
-                                                onPress={() => v.isAvailable && setSelectedVariant(v)}
-                                            >
-                                                {discount > 0 && (
-                                                    <View style={styles.discountBadge}>
-                                                        <MonoText size="xxs" weight="bold" color={colors.white}>{discount}% OFF</MonoText>
+                                            return (
+                                                <TouchableOpacity
+                                                    key={v.inventoryId || index}
+                                                    style={[
+                                                        styles.newVariantCard,
+                                                        isSelected && styles.newVariantCardSelected
+                                                    ]}
+                                                    onPress={() => v.isAvailable && setSelectedVariant(v)}
+                                                >
+                                                    {discount > 0 && (
+                                                        <View style={styles.discountBadge}>
+                                                            <MonoText size="xxs" weight="bold" color={colors.white}>{discount}% OFF</MonoText>
+                                                        </View>
+                                                    )}
+                                                    <View style={styles.variantContent}>
+                                                        <MonoText size="m" weight="bold">{formatVariantLabel(v.variant)}</MonoText>
+                                                        <View style={styles.variantPriceRow}>
+                                                            <MonoText size="s" weight="bold">₹{v.pricing.sellingPrice}</MonoText>
+                                                            <MonoText size="xs" color={colors.textLight} style={styles.strikeText}>MRP ₹{v.pricing.mrp}</MonoText>
+                                                        </View>
+                                                        {/* Re-added Price per Unit */}
+                                                        <MonoText size="xxs" color={colors.textLight} style={{ marginTop: 4 }}>
+                                                            {getPricePerUnit(v.pricing, v.variant)}
+                                                        </MonoText>
                                                     </View>
-                                                )}
-                                                <View style={styles.variantContent}>
-                                                    <MonoText size="m" weight="bold">{formatVariantLabel(v.variant)}</MonoText>
-                                                    <View style={styles.variantPriceRow}>
-                                                        <MonoText size="s" weight="bold">₹{v.pricing.sellingPrice}</MonoText>
-                                                        <MonoText size="xs" color={colors.textLight} style={styles.strikeText}>MRP ₹{v.pricing.mrp}</MonoText>
-                                                    </View>
-                                                    {/* Re-added Price per Unit */}
-                                                    <MonoText size="xxs" color={colors.textLight} style={{ marginTop: 4 }}>
-                                                        {getPricePerUnit(v.pricing, v.variant)}
-                                                    </MonoText>
-                                                </View>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                </ScrollView>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </ScrollView>
+                                )}
                             </View>
 
                             {/* Toggleable Details */}
-                            <TouchableOpacity
-                                style={styles.detailsToggle}
-                                onPress={() => {
-                                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                                    setShowDetails(!showDetails);
-                                }}
-                            >
-                                <MonoText size="m" weight="bold" color={colors.accent}>View product details</MonoText>
-                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2.5"
-                                    style={{ transform: [{ rotate: showDetails ? '180deg' : '0deg' }] }}>
-                                    <Path d="M6 9l6 6 6-6" />
-                                </Svg>
-                            </TouchableOpacity>
+                            {isLoadingProduct ? (
+                                <View style={{ marginTop: 20 }}>
+                                    <SkeletonItem width={150} height={18} borderRadius={4} style={{ marginBottom: 12 }} />
+                                    <SkeletonItem width="100%" height={14} borderRadius={4} style={{ marginBottom: 6 }} />
+                                    <SkeletonItem width="100%" height={14} borderRadius={4} style={{ marginBottom: 6 }} />
+                                    <SkeletonItem width="70%" height={14} borderRadius={4} />
+                                </View>
+                            ) : (
+                                <TouchableOpacity
+                                    style={styles.detailsToggle}
+                                    onPress={() => {
+                                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                                        setShowDetails(!showDetails);
+                                    }}
+                                >
+                                    <MonoText size="m" weight="bold" color={colors.accent}>View product details</MonoText>
+                                    <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2.5"
+                                        style={{ transform: [{ rotate: showDetails ? '180deg' : '0deg' }] }}>
+                                        <Path d="M6 9l6 6 6-6" />
+                                    </Svg>
+                                </TouchableOpacity>
+                            )}
 
                             {showDetails && (
                                 <View style={styles.detailsExpanded}>
@@ -578,7 +738,7 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                     {loadingRelated ? (
                                         <FlatList
                                             horizontal
-                                            data={[1, 2, 3]}
+                                            data={[1, 2, 3, 4]}
                                             keyExtractor={(i) => `cat-skeleton-${i}`}
                                             showsHorizontalScrollIndicator={false}
                                             renderItem={() => <ProductSkeleton width={width * 0.4} />}
@@ -588,21 +748,28 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                         <FlatList
                                             horizontal
                                             data={relatedProducts}
-                                            keyExtractor={(item) => item._id}
+                                            keyExtractor={(item) => `${item._id}_${item.inventoryId}`}
                                             showsHorizontalScrollIndicator={false}
                                             renderItem={({ item }) => {
-                                                const variants = (item as any).variants || [];
-                                                const firstVariant = variants[0];
-                                                const cartItemId = firstVariant?._id || firstVariant?.inventoryId || item._id;
+                                                // Products now have embedded variant data from API
+                                                const variantData = {
+                                                    _id: item.inventoryId,
+                                                    inventoryId: item.inventoryId,
+                                                    variant: item.variant,
+                                                    pricing: item.pricing,
+                                                    stock: item.stock,
+                                                    isAvailable: item.isAvailable
+                                                };
+                                                const cartItemId = item.inventoryId || item._id;
 
                                                 return (
                                                     <ProductGridCard
                                                         product={item}
-                                                        variant={firstVariant}
+                                                        variant={variantData}
                                                         quantity={getItemQuantity(cartItemId)}
                                                         width={width * 0.4}
                                                         onAddToCart={(prod, variant) => {
-                                                            const cid = variant?._id || variant?.inventoryId || prod._id;
+                                                            const cid = variant?.inventoryId || variant?._id || prod._id;
                                                             const productImage = variant?.variant?.images?.[0] || prod.images?.[0] || prod.image;
                                                             const success = addToCart({
                                                                 ...prod,
@@ -635,7 +802,35 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                                 );
                                             }}
                                             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+                                            onEndReached={loadMoreRelated}
+                                            onEndReachedThreshold={0.5}
+                                            ListFooterComponent={() => isLoadingMoreRelated ? (
+                                                <View style={{ flexDirection: 'row', paddingLeft: 12 }}>
+                                                    <ProductSkeleton width={width * 0.4} />
+                                                </View>
+                                            ) : null}
                                         />
+                                    )}
+                                    {/* See All Button */}
+                                    {!loadingRelated && relatedProducts.length > 0 && (
+                                        <TouchableOpacity
+                                            style={styles.seeAllBtn}
+                                            onPress={() => {
+                                                onClose();
+                                                navigation.navigate('BrowseProducts', {
+                                                    type: 'category',
+                                                    value: (currentProduct.category as any)?.name || currentProduct.category || 'Products',
+                                                    categoryId: (currentProduct.category as any)?._id || currentProduct.category
+                                                });
+                                            }}
+                                        >
+                                            <MonoText size="s" weight="bold" color={colors.primary} style={{ textDecorationLine: 'underline' }}>
+                                                See all products in this category
+                                            </MonoText>
+                                            <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2.5" style={{ marginLeft: 4 }}>
+                                                <Path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                                            </Svg>
+                                        </TouchableOpacity>
                                     )}
                                 </View>
                             )}
@@ -646,7 +841,7 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                     {loadingRelated ? (
                                         <FlatList
                                             horizontal
-                                            data={[1, 2, 3]}
+                                            data={[1, 2, 3, 4]}
                                             keyExtractor={(i) => `brand-skeleton-${i}`}
                                             showsHorizontalScrollIndicator={false}
                                             renderItem={() => <ProductSkeleton width={width * 0.4} />}
@@ -656,21 +851,28 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                         <FlatList
                                             horizontal
                                             data={brandProducts}
-                                            keyExtractor={(item) => item._id}
+                                            keyExtractor={(item) => `${item._id}_${item.inventoryId}`}
                                             showsHorizontalScrollIndicator={false}
                                             renderItem={({ item }) => {
-                                                const variants = (item as any).variants || [];
-                                                const firstVariant = variants[0];
-                                                const cartItemId = firstVariant?._id || firstVariant?.inventoryId || item._id;
+                                                // Products now have embedded variant data from API
+                                                const variantData = {
+                                                    _id: item.inventoryId,
+                                                    inventoryId: item.inventoryId,
+                                                    variant: item.variant,
+                                                    pricing: item.pricing,
+                                                    stock: item.stock,
+                                                    isAvailable: item.isAvailable
+                                                };
+                                                const cartItemId = item.inventoryId || item._id;
 
                                                 return (
                                                     <ProductGridCard
                                                         product={item}
-                                                        variant={firstVariant}
+                                                        variant={variantData}
                                                         quantity={getItemQuantity(cartItemId)}
                                                         width={width * 0.4}
                                                         onAddToCart={(prod, variant) => {
-                                                            const cid = variant?._id || variant?.inventoryId || prod._id;
+                                                            const cid = variant?.inventoryId || variant?._id || prod._id;
                                                             const productImage = variant?.variant?.images?.[0] || prod.images?.[0] || prod.image;
                                                             const success = addToCart({
                                                                 ...prod,
@@ -703,7 +905,34 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                                 );
                                             }}
                                             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+                                            onEndReached={loadMoreBrand}
+                                            onEndReachedThreshold={0.5}
+                                            ListFooterComponent={() => isLoadingMoreBrand ? (
+                                                <View style={{ flexDirection: 'row', paddingLeft: 12 }}>
+                                                    <ProductSkeleton width={width * 0.4} />
+                                                </View>
+                                            ) : null}
                                         />
+                                    )}
+                                    {/* See All Button */}
+                                    {!loadingRelated && brandProducts.length > 0 && currentProduct.brand && (
+                                        <TouchableOpacity
+                                            style={styles.seeAllBtn}
+                                            onPress={() => {
+                                                onClose();
+                                                navigation.navigate('BrowseProducts', {
+                                                    type: 'brand',
+                                                    value: currentProduct.brand
+                                                });
+                                            }}
+                                        >
+                                            <MonoText size="s" weight="bold" color={colors.primary} style={{ textDecorationLine: 'underline' }}>
+                                                See all from {currentProduct.brand}
+                                            </MonoText>
+                                            <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2.5" style={{ marginLeft: 4 }}>
+                                                <Path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                                            </Svg>
+                                        </TouchableOpacity>
                                     )}
                                 </View>
                             )}
@@ -884,18 +1113,18 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                             )}
                         </View>
 
-                        {quantity === 0 ? (
+                        {(quantity === 0 || !currentVariant?.isAvailable || currentVariant?.stock <= 0) ? (
                             <TouchableOpacity
                                 style={[
                                     styles.actionButton,
                                     styles.addButton,
-                                    (!currentVariant?.isAvailable) && styles.addButtonDisabled
+                                    (!currentVariant?.isAvailable || currentVariant?.stock <= 0) && styles.addButtonDisabled
                                 ]}
                                 onPress={handleAddToCart}
-                                disabled={!currentVariant?.isAvailable}
+                                disabled={!currentVariant?.isAvailable || currentVariant?.stock <= 0}
                             >
                                 <MonoText size="m" weight="bold" color={colors.white}>
-                                    {currentVariant?.isAvailable ? 'Add to cart' : 'Out of Stock'}
+                                    {(!currentVariant?.isAvailable || currentVariant?.stock <= 0) ? 'Out of Stock' : 'Add to cart'}
                                 </MonoText>
                             </TouchableOpacity>
                         ) : (
@@ -930,6 +1159,10 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'flex-end',
     },
+    soldOutButton: {
+        backgroundColor: colors.border,
+        borderColor: colors.border,
+    },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
     },
@@ -956,15 +1189,16 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        backgroundColor: colors.white, 
         justifyContent: 'center',
         alignItems: 'center',
         ...Platform.select({
             ios: {
                 shadowColor: '#000',
-                shadowOffset: { width: 0, height: 2 },
+                shadowOffset: { width: 0, height: 4 },
                 shadowOpacity: 0.1,
-                shadowRadius: 4,
+                shadowRadius: 10,
+                backgroundColor: colors.white // Solid background required for shadow efficiency
             },
             android: {
                 elevation: 3,
@@ -1046,7 +1280,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: colors.white,
         position: 'relative',
-        overflow: 'hidden',
+        // overflow: 'hidden', // Removed to allow shadow to be visible. Badge radius handles clipping.
     },
     newVariantCardSelected: {
         borderColor: colors.accent,
@@ -1060,6 +1294,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 2,
         borderBottomRightRadius: 8,
+        borderTopLeftRadius: 16, // Match card radius since overflow is removed
     },
     variantContent: {
         marginTop: 4,
@@ -1292,6 +1527,13 @@ const styles = StyleSheet.create({
         borderColor: colors.accent,
         marginTop: 8,
         marginBottom: 24,
+    },
+    seeAllBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 12,
+        paddingVertical: 8,
     },
 });
 

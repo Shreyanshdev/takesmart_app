@@ -38,7 +38,9 @@ export const branchService = {
         const data = response.data;
         return {
             ...data.branch,
-            distance: data.distance
+            distance: data.distance,
+            deliveryRadiusKm: data.deliveryRadiusKm,
+            isWithinRadius: data.isWithinRadius
         };
     },
 

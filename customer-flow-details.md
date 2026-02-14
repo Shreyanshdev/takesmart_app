@@ -1,23 +1,22 @@
 # Customer Flow Details
 
-This document provides a comprehensive overview of the Customer application flow, including normal orders, subscription management, and order tracking.
+This document provides a comprehensive overview of the Customer application flow, including normal orders, and order tracking.
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Authentication & Navigation](#authentication--navigation)
-3. [Home Screen & Product Discovery](#home-screen--product-discovery)
-4. [Normal Order Flow](#normal-order-flow)
-5. [Subscription Order Flow](#subscription-order-flow)
+2. [Project Structure](#project-structure)
+3. [Authentication & Navigation](#authentication--navigation)
+4. [Home Screen & Product Discovery](#home-screen--product-discovery)
+5. [Normal Order Flow](#normal-order-flow)
 6. [Order Tracking](#order-tracking)
-7. [Subscription Management](#subscription-management)
-8. [Profile & Address Management](#profile--address-management)
-9. [Socket Events](#socket-events)
-10. [API Endpoints](#api-endpoints)
-11. [Status Reference](#status-reference)
-12. [Screen Details](#screen-details)
+7. [Profile & Address Management](#profile--address-management)
+8. [Socket Events](#socket-events)
+9. [API Endpoints](#api-endpoints)
+10. [Status Reference](#status-reference)
+11. [Screen Details](#screen-details)
 
 ---
 
@@ -26,16 +25,62 @@ This document provides a comprehensive overview of the Customer application flow
 The Customer app enables users to:
 - Browse and purchase dairy products (milk, curd, etc.)
 - Place one-time orders with real-time tracking
-- Subscribe to recurring daily/alternate-day deliveries
-- Manage delivery schedules and pause/resume subscriptions
 - Track deliveries in real-time with live location
-- View order history and subscription details
+- View order history
 
 ### Key Principles
 - **Location-based**: Products and branches assigned by customer location
 - **Real-time tracking**: Live delivery partner location via Socket.io
-- **Flexible subscriptions**: Pause, reschedule, modify anytime
 - **Two confirmation flows**: Customer confirms delivery receipt
+
+---
+
+## Project Structure
+
+### Core Directories
+- `src/screens/customer/`: Page-level components
+- `src/components/`: Reusable UI modules
+- `src/services/customer/`: API and domain logic
+- `src/store/`: Global state management (Zustand)
+
+### Detailed File Hierarchy
+
+#### Screens (`src/screens/customer/`)
+- `Home/HomeScreen.tsx`: Main landing with product grid
+- `Product/`: `SearchScreen.tsx`, `CategoriesScreen.tsx`
+- `Checkout/`: `AddAddressScreen.tsx`, `CheckoutScreen.tsx`
+- `Orders/`: `OrderHistoryScreen.tsx`, `OrderTrackingScreen.tsx`
+- `Profile/`: `ProfileScreen.tsx`, `EditProfileScreen.tsx`, `FeedbackScreen.tsx`
+
+#### Home Components (`src/components/home/`)
+- `HomeHeader.tsx`: Location display and search bar
+- `HeroSection.tsx`: Dynamic banners and brand messaging
+- `PromoCarousel.tsx`: Marketing banners
+- `ProductCard.tsx`: Individual product item with add-to-cart
+- `ProductDetailsModal.tsx`: Comprehensive product view with variants
+- `AddressSelectionModal.tsx`: Location & branch allocation logic
+- `CategoryGrid.tsx`: Quick category navigation
+
+#### Shared & Checkout Components
+- `checkout/`: `ApplyCouponModal.tsx`, `CheckoutAddressModal.tsx`
+- `shared/MonoText.tsx`: Design system typography
+- `shared/OrderSuccessModal.tsx`: Order confirmation status
+- `shared/RatingModal.tsx`: Post-delivery feedback
+- `shared/BlurBottomSheet.tsx`: Glassmorphism modal base
+
+#### Services (`src/services/customer/`)
+- `product.service.ts`: Products, variants, and inventory validation
+- `order.service.ts`: Order creation, tracking, and payment verification
+- `address.service.ts`: CRUD for customer addresses
+- `branch.service.ts`: Nearest branch detection and coverage
+- `coupon.service.ts`: Promo code validation
+- `invoice.service.ts`: PDF generation and sharing
+
+#### State Management (`src/store/`)
+- `cart.store.ts`: Cart items, stock sync, and total calculations
+- `authStore.ts`: User session and profile data
+- `home.store.ts`: Cached home screen data (products/banners)
+- `branch.store.ts`: Currently allocated branch information
 
 ---
 
@@ -53,8 +98,7 @@ The Customer app enables users to:
 CustomerTabNavigator
 ├── Home (HomeScreen)           → Product browsing & banners
 ├── Orders (OrdersScreen)       → Active & past orders
-├── Subscription (SubscriptionScreen) → Subscription management
-└── Profile (ProfileScreen)     → Account settings
+   └── Profile (ProfileScreen)     → Account settings
 ```
 
 ---
@@ -76,10 +120,6 @@ CustomerTabNavigator
 │  │  Tap to set your delivery location                    │   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
-│  ┌─ Active Subscription Banner ─────────────────────────┐   │
-│  │  Today's delivery status │ Manage subscription        │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                              │
 │  ┌─ Product Categories ─────────────────────────────────┐   │
 │  │  Milk │ Curd │ Butter │ ...                          │   │
 │  └──────────────────────────────────────────────────────┘   │
@@ -91,9 +131,7 @@ CustomerTabNavigator
 │  │  └─────────┘  └─────────┘  └─────────┘              │   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
-│  ┌─ Subscription Widget ────────────────────────────────┐   │
-│  │  Subscribe for Daily Fresh Delivery                   │   │
-│  └──────────────────────────────────────────────────────┘   │
+│
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -108,12 +146,16 @@ CustomerTabNavigator
 2. **Product Loading**
    - Fetches products for assigned branch
    - Categories and filters available
-   - Subscription-eligible products marked
 
 3. **Product Selection**
    - Tap product card → `ProductDetailsModal`
-   - Shows price, description, quantity options
-   - Add to cart or Subscribe button
+   - Shows price, description, variant options (weight/unit)
+   - Add to cart button (checks current stock and per-order limits)
+
+4. **Cart Management**
+   - Persistent cart stored locally using `AsyncStorage` via `cart.store.ts`
+   - Automatic validation of stock for each increment
+   - Supports multiple variants of the same product as separate line items (grouped by inventoryId)
 
 ---
 
@@ -126,49 +168,40 @@ CustomerTabNavigator
 │                        NORMAL ORDER LIFECYCLE                            │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│   CUSTOMER                         SYSTEM                    PARTNER     │
-│   --------                         ------                    -------     │
+│  1. ADDRESS & BRANCH ALLOCATION                                          │
+│     │                                                                    │
+│     ├── Customer opens Cart/Checkout                                     │
+│     ├── Address Selection Modal opens automatically if no address set    │
+│     ├── User selects/adds address                                        │
+│     └── System detects Nearest Branch & Branch Inventory for this address │
 │                                                                          │
-│   Browses products                                                       │
-│        │                                                                 │
-│   Adds to cart                                                           │
-│        │                                                                 │
-│   Proceeds to checkout             Creates cart summary                  │
-│        │                                                                 │
-│   Selects/Adds address             Validates delivery area               │
-│        │                                                                 │
-│   Chooses payment method                                                 │
-│        │                                                                 │
-│   Places order ────────────────► Creates Order                          │
-│        │                         status: pending                         │
-│        │                              │                                  │
-│   Sees "Order Placed"                 ├───────────► Partner notified     │
-│   + Order ID                          │             (socket event)       │
-│        │                              │                                  │
-│        │                              │        Partner accepts ◄─────────│
-│        │                              │              │                   │
-│   Gets notification ◄── status: accepted ───────────┘                   │
-│   "Partner Assigned"                  │                                  │
-│        │                              │                                  │
-│   Can track partner                   │        Partner picks up ◄────────│
-│   live location                       │              │                   │
-│        │                              │              │                   │
-│   Gets notification ◄── status: in-progress ────────┘                   │
-│   "On The Way"                        │                                  │
-│        │                              │                                  │
-│   Live tracking active ◄─── Location updates via socket                 │
-│        │                              │                                  │
-│        │                              │        Partner delivers ◄────────│
-│        │                              │              │                   │
-│   Gets notification ◄── status: awaitconfirmation ──┘                   │
-│   "Confirm Receipt"                   │                                  │
-│        │                              │                                  │
-│   Taps "Confirm Delivery"             │                                  │
-│        │                              │                                  │
-│        ├──────────────────────► status: delivered                        │
-│        │                              │                                  │
-│   Sees order summary               Partner notified ─────────────────────│
-│   + delivery time                                                        │
+│  2. CART VALIDATION & STOCK SYNC                                         │
+│     │                                                                    │
+│     ├── System validates ALL items against the selected branch inventory  │
+│     ├── If stock matches: Proceed                                        │
+│     └── If stock insufficient: Automatically adjust quantities or mark   │
+│         items as Out of Stock in cart. User gets adjustment notice.      │
+│                                                                          │
+│  3. CHECKOUT & PAYMENT                                                   │
+│     │                                                                    │
+│     ├── User reviews final bill (MRP, Discounts, Tax, Delivery Fee)      │
+│     ├── User chooses Payment Method (Razorpay Online or Cash on Delivery)│
+│     ├── User places order                                                │
+│     └── Order status set to "pending"                                    │
+│                                                                          │
+│  4. DELIVERY PARTNER ASSIGNMENT                                          │
+│     │                                                                    │
+│     ├── System notifies nearest partners via socket                      │
+│     ├── Partner accepts order → status: "accepted"                       │
+│     └── Customer sees Partner details and contact button                 │
+│                                                                          │
+│  5. LIVE TRACKING & DELIVERY                                             │
+│     │                                                                    │
+│     ├── Partner picks up → status: "in-progress" / "out_for_delivery"    │
+│     ├── Live tracking starts on map (live location / ETA)                │
+│     ├── Partner reaches → status: "awaitconfirmation"                    │
+│     ├── Customer confirms delivery → status: "delivered"                 │
+│     └── Order success summary & review products                          │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -179,107 +212,13 @@ CustomerTabNavigator
 |--------|---------------|--------|
 | `pending` | "Finding Delivery Partner" | Cancel order |
 | `accepted` | "Partner Assigned" + name | Track partner, Call partner |
-| `in-progress` | "On The Way" + live map | Track partner, Call partner |
-| `awaitconfirmation` | "Confirm Delivery" button | Confirm receipt |
-| `delivered` | "Delivered" + summary | Rate, View receipt |
-| `cancelled` | "Cancelled" | - |
+| `in-progress` | "On The Way" (Out for Delivery) | Track partner, Call partner |
+| `awaitconfirmation` | "Confirm Delivery" button | Confirm receipt (Verify package) |
+| `delivered` | "Delivered" + summary | Rate products, Download Invoice |
+| `cancelled` | "Cancelled" | View reason if available |
 
 ---
 
-## Subscription Order Flow
-
-### Subscription Creation Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     SUBSCRIPTION CREATION FLOW                           │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│   1. Product Selection                                                   │
-│      │                                                                   │
-│      ├── Customer taps product card                                      │
-│      ├── Opens ProductDetailsModal                                       │
-│      └── Taps "Subscribe" button                                         │
-│               │                                                          │
-│   2. Subscription Modal                                                  │
-│      │                                                                   │
-│      ├── Select quantity (e.g., 500ml, 1L)                              │
-│      ├── Select frequency (Daily / Alternate Days)                      │
-│      ├── Select delivery slot (Morning / Evening)                       │
-│      ├── Select start date                                              │
-│      └── View price summary                                             │
-│               │                                                          │
-│   3. Checkout                                                            │
-│      │                                                                   │
-│      ├── Select/Add delivery address                                    │
-│      ├── Choose payment method                                          │
-│      └── Confirm subscription                                           │
-│               │                                                          │
-│   4. Subscription Created                                                │
-│      │                                                                   │
-│      ├── Status: active                                                 │
-│      ├── Delivery calendar generated                                    │
-│      ├── Partner assigned (if fixed)                                    │
-│      └── Customer sees subscription in "My Subscriptions"               │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Daily Subscription Delivery Lifecycle
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                  SUBSCRIPTION DELIVERY LIFECYCLE                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│   SYSTEM (Automatic)               CUSTOMER                   PARTNER    │
-│   -----------------               --------                   -------     │
-│                                                                          │
-│   Cutoff time reached                                                    │
-│   (e.g., 4 AM for morning)                                              │
-│        │                                                                 │
-│   Generates today's                                                      │
-│   deliveries                    Sees "Today's Delivery"                 │
-│   status: scheduled             in app banner                            │
-│        │                              │                                  │
-│        │                              │         Partner starts ◄─────────│
-│        │                              │              │                   │
-│   status: reaching ◄──────────────────┴──────────────┘                   │
-│        │                                                                 │
-│   Customer gets                                                          │
-│   "Partner on the way"                                                   │
-│   notification                                                           │
-│        │                                                                 │
-│   Live tracking                                                          │
-│   becomes available                                                      │
-│        │                                                                 │
-│        │                                          Partner arrives ◄──────│
-│        │                                               │                 │
-│   status: awaitingCustomer ◄───────────────────────────┘                 │
-│        │                                                                 │
-│   "Confirm Receipt"                                                      │
-│   notification                                                           │
-│        │                                                                 │
-│   Customer taps                                                          │
-│   "Confirm"                                                              │
-│        │                                                                 │
-│   status: delivered                                                      │
-│   remainingDeliveries--                                                  │
-│   deliveredCount++                                                       │
-│                                                                          │
-│   ─────── OR (if customer unavailable) ──────                            │
-│                                                                          │
-│        │                                          Partner marks ◄────────│
-│        │                                          "No Response"          │
-│        │                                               │                 │
-│   status: noResponse ◄─────────────────────────────────┘                 │
-│   remainingDeliveries--                                                  │
-│   (NO concession given)                                                  │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
 
 ## Order Tracking
 
@@ -333,51 +272,6 @@ CustomerTabNavigator
 ```
 
 ---
-
-## Subscription Management
-
-### Subscription Calendar Screen
-
-The `SubscriptionCalendarScreen` provides full control over deliveries:
-
-**Calendar Tab Features:**
-- Month view with delivery status indicators
-- Filter by product
-- Multi-select mode for bulk actions
-- Today's delivery card
-- Status legend
-
-**Details Tab Features:**
-- Subscription ID and status
-- Delivery slot and period
-- Delivery address
-- Assigned partner (with call button)
-- Products list with remaining deliveries
-
-### Subscription Actions
-
-| Action | Description | API |
-|--------|-------------|-----|
-| Pause | Temporarily stop deliveries | `PATCH /subscriptions/:id/pause` |
-| Resume | Restart paused subscription | `PATCH /subscriptions/:id/resume` |
-| Reschedule | Change specific day's delivery | `PATCH /subscriptions/delivery/:id` |
-| Skip | Skip a specific day | `PATCH /subscriptions/delivery/:id/skip` |
-| Add Product | Add more products | Navigate to selection |
-| Cancel | End subscription early | `DELETE /subscriptions/:id` |
-
-### Delivery Status Colors (Calendar)
-
-| Color | Status | Meaning |
-|-------|--------|---------|
-| 🟢 Green | `delivered` | Successfully delivered |
-| 🟡 Yellow | `scheduled` | Upcoming delivery |
-| 🔵 Blue | `reaching` | Partner on the way |
-| 🟠 Orange | `awaitingCustomer` | Waiting for confirmation |
-| 🔴 Red | `noResponse` | Customer unavailable |
-| ⚫ Gray | `paused` | Delivery paused |
-
----
-
 ## Profile & Address Management
 
 ### Profile Screen Features
@@ -391,12 +285,24 @@ The `SubscriptionCalendarScreen` provides full control over deliveries:
 
 ### Address Management
 
-| Action | Screen | API |
-|--------|--------|-----|
-| Add Address | `AddAddressScreen` with map | `POST /addresses` |
-| Edit Address | Same screen in edit mode | `PUT /addresses/:id` |
-| Delete Address | Swipe or delete button | `DELETE /addresses/:id` |
-| Set Default | Mark as primary | `PATCH /addresses/:id/default` |
+### Address Selection & Branch Logic
+
+The app uses a strict address-to-inventory mapping:
+
+1. **Address Selection**: User selects a saved address or adds a new one via the `AddressSelectionModal`.
+2. **Branch Detection**: Backend detects the nearest branch and checks if it's within the service radius.
+3. **Cart Re-validation**:
+   - The system calls `validateCartStock` whenever a new address is selected or an item quantity is updated.
+   - If the new branch has less stock than the cart quantity, the cart is automatically adjusted down to the available stock.
+   - If an item is not available in the new branch, it is marked as Out of Stock (0 quantity).
+4. **Distance & Charges**: Delivery charges are calculated based on the distance between the selected address and the allocated branch.
+
+| Action | Component | Logic |
+|--------|-----------|-------|
+| Add Address | `AddAddressScreen` | Places pin on map, gets geocoded address |
+| Select Address | `AddressSelectionModal` | Triggers branch search & stock sync |
+| Delete Address | `AddressSelectionModal` | Removes address from profile |
+| Default Address | `Profile` | Sets the preferred delivery location |
 
 ---
 
@@ -410,8 +316,6 @@ The `SubscriptionCalendarScreen` provides full control over deliveries:
 | `orderPickedUp` | `order-{orderId}` | Partner picked up | Show tracking |
 | `awaitingCustomerConfirmation` | `customer-{userId}` | Partner delivered | Show confirm button |
 | `partnerLocationUpdate` | `order-{orderId}` | Partner moving | Update map marker |
-| `deliveryStarted` | `customer-{userId}` | Subscription delivery starts | Show notification |
-| `subscriptionUpdated` | `subscription-{subId}` | Any subscription change | Refresh data |
 
 ### Rooms Customer Joins
 
@@ -419,7 +323,6 @@ The `SubscriptionCalendarScreen` provides full control over deliveries:
 |------|---------|--------------|
 | `customer-{userId}` | Personal notifications | On app start |
 | `order-{orderId}` | Specific order updates | When tracking order |
-| `subscription-{subId}` | Subscription updates | When viewing subscription |
 
 ---
 
@@ -453,17 +356,7 @@ The `SubscriptionCalendarScreen` provides full control over deliveries:
 | `POST` | `/orders/:id/confirm` | Confirm delivery |
 | `POST` | `/orders/:id/cancel` | Cancel order |
 
-### Subscriptions
 
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `POST` | `/subscriptions` | Create subscription |
-| `GET` | `/subscriptions/my-subscriptions` | Get customer's subscriptions |
-| `GET` | `/subscriptions/:id` | Get subscription details |
-| `GET` | `/subscriptions/:id/calendar` | Get delivery calendar |
-| `PATCH` | `/subscriptions/:id/pause` | Pause subscription |
-| `PATCH` | `/subscriptions/:id/resume` | Resume subscription |
-| `POST` | `/subscriptions/deliveries/:id/confirm` | Confirm delivery |
 
 ### Addresses
 
@@ -484,22 +377,11 @@ The `SubscriptionCalendarScreen` provides full control over deliveries:
 |--------|---------------|-------------|
 | `pending` | Finding Partner | Order placed, awaiting partner |
 | `accepted` | Partner Assigned | Partner accepted the order |
-| `in-progress` | On The Way | Partner has picked up |
-| `awaitconfirmation` | Confirm Receipt | Partner at location |
-| `delivered` | Delivered | Customer confirmed |
+| `in-progress` | Out for Delivery | Partner has picked up from branch |
+| `awaitconfirmation` | Confirm Receipt | Partner at customer location |
+| `delivered` | Delivered | Customer confirmed receipt |
 | `cancelled` | Cancelled | Order was cancelled |
 
-### Subscription Delivery Statuses
-
-| Status | Customer Sees | Description |
-|--------|---------------|-------------|
-| `scheduled` | Scheduled | Upcoming delivery |
-| `reaching` | On The Way | Partner is out |
-| `awaitingCustomer` | Confirm Receipt | Partner waiting |
-| `delivered` | Delivered | Successfully delivered |
-| `noResponse` | Missed | Customer was unavailable |
-| `paused` | Paused | Delivery on hold |
-| `canceled` | Cancelled | Delivery cancelled |
 
 ---
 
@@ -511,11 +393,7 @@ The `SubscriptionCalendarScreen` provides full control over deliveries:
 
 **Components**:
 - `HomeHeader`: Location, search, notifications
-- `ActiveSubscriptionBanner`: Today's delivery status
-- `SubscriptionCalendarBanner`: Quick subscription actions
-- `ProductCard`: Product grid items
-- `ProductDetailsModal`: Product details with add/subscribe
-- `SubscriptionModal`: Subscription configuration
+- `ProductDetailsModal`: Product details with add
 
 ### 2. Orders Screen
 
@@ -526,20 +404,6 @@ The `SubscriptionCalendarScreen` provides full control over deliveries:
 - Past Orders (completed/cancelled)
 - Order cards with status badges
 - Tap to track or view details
-
-### 3. Subscription Calendar Screen
-
-**Purpose**: Full subscription management
-
-**Tabs**:
-- Calendar: Monthly view with deliveries
-- Details: Subscription info and products
-
-**Features**:
-- Multi-select for bulk reschedule
-- Product filter dropdown
-- Today's delivery card
-- Status legend
 
 ### 4. Profile Screen
 
@@ -563,15 +427,8 @@ src/
 │   │   ├── HomeHeader.tsx           # Header with location
 │   │   ├── ProductCard.tsx          # Product grid item
 │   │   ├── ProductDetailsModal.tsx  # Product details
-│   │   ├── SubscriptionModal.tsx    # Subscription config
-│   │   ├── ActiveSubscriptionBanner.tsx
-│   │   ├── SubscriptionCalendarBanner.tsx
 │   │   └── AddressSelectionModal.tsx
 │   │
-│   ├── subscription/
-│   │   ├── CalendarTabContent.tsx   # Calendar view
-│   │   ├── DetailsTabContent.tsx    # Details view
-│   │   └── DeliveryDetailModal.tsx  # Day details
 │   │
 │   └── shared/
 │       ├── MonoText.tsx             # Custom text
@@ -581,7 +438,6 @@ src/
 │   ├── Home/HomeScreen.tsx
 │   ├── Orders/OrdersScreen.tsx
 │   ├── Orders/OrderTrackingScreen.tsx
-│   ├── Subscription/SubscriptionCalendarScreen.tsx
 │   ├── Profile/ProfileScreen.tsx
 │   └── Checkout/
 │       ├── CartScreen.tsx
@@ -591,7 +447,6 @@ src/
 ├── services/customer/
 │   ├── product.service.ts
 │   ├── order.service.ts
-│   ├── subscription.service.ts
 │   └── address.service.ts
 │
 ├── store/
@@ -619,16 +474,7 @@ src/
 - [ ] Confirm delivery
 - [ ] Check order in history
 
-### Subscription Flow
-- [ ] Subscribe to a product
-- [ ] Configure frequency and slot
-- [ ] Complete subscription checkout
-- [ ] Verify subscription in calendar
-- [ ] Check today's delivery banner
-- [ ] Confirm subscription delivery
-- [ ] Test pause/resume
-- [ ] Test reschedule delivery
-- [ ] Add product to existing subscription
+
 
 ### Profile & Settings
 - [ ] Edit profile name/email

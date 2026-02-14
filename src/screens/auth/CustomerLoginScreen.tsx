@@ -8,7 +8,6 @@ import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../../components/shared/MonoText';
-import { OtpBottomSheet } from '../../components/auth/OtpBottomSheet';
 import { authService } from '../../services/auth/auth.service';
 import { logger } from '../../utils/logger';
 
@@ -17,9 +16,7 @@ const { width, height } = Dimensions.get('window');
 export const CustomerLoginScreen = () => {
     const navigation = useNavigation<any>();
     const [phoneNumber, setPhoneNumber] = useState('');
-    const [otpVisible, setOtpVisible] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [verificationId, setVerificationId] = useState<string | null>(null);
     const inputRef = useRef<TextInput | null>(null);
 
     const handlePhoneChange = (text: string) => {
@@ -35,48 +32,18 @@ export const CustomerLoginScreen = () => {
         try {
             const response = await authService.sendOtp(phoneNumber);
             if (response && response.verificationId) {
-                setVerificationId(response.verificationId);
                 setLoading(false);
-                setOtpVisible(true);
+                navigation.navigate('OTPScreen', {
+                    phoneNumber,
+                    verificationId: response.verificationId
+                });
             } else {
                 throw new Error('No verification ID received');
             }
         } catch (error) {
             setLoading(false);
             logger.error('Send OTP error:', error);
-            throw error;
-        }
-    };
-
-    const handleVerifyOtp = async (otp: string) => {
-        if (!verificationId) {
-            Alert.alert('Error', 'Session expired. Please request OTP again.');
-            throw new Error('Session expired');
-        }
-
-        try {
-            await authService.verifyOtp(phoneNumber, otp, verificationId);
-            setOtpVisible(false);
-
-            const { useAuthStore } = require('../../store/authStore');
-            const { userService } = require('../../services/customer/user.service');
-            const userProfile = await userService.getProfile().catch(() => ({ _id: 'temp', phone: phoneNumber }));
-
-            const { storage } = require('../../services/core/storage');
-            await storage.setUser(userProfile);
-
-            useAuthStore.getState().login(userProfile);
-
-            if (!userProfile.name) {
-                navigation.replace('CompleteProfile');
-            } else {
-                const { useBranchStore } = require('../../store/branch.store');
-                useBranchStore.getState().setShouldShowAddressModal(true);
-                navigation.replace('MainTabs', { screen: 'Home' });
-            }
-        } catch (error) {
-            logger.error('Verify OTP error:', error);
-            throw error;
+            Alert.alert('Error', 'Failed to send OTP. Please try again.');
         }
     };
 
@@ -203,14 +170,6 @@ export const CustomerLoginScreen = () => {
                     </ScrollView>
                 </KeyboardAvoidingView>
             </SafeAreaView>
-
-            <OtpBottomSheet
-                visible={otpVisible}
-                onClose={() => setOtpVisible(false)}
-                phoneNumber={phoneNumber}
-                onVerify={handleVerifyOtp}
-                onResend={handleSendOtp}
-            />
         </View>
     );
 };

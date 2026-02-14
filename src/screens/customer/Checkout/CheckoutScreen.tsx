@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert, Platform, ActivityIndicator, Image, FlatList, Modal } from 'react-native';
+// @ts-ignore
+import debounce from 'lodash.debounce';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import Svg, { Path, Circle, Line, Rect } from 'react-native-svg';
@@ -26,6 +28,7 @@ import { ApplyCouponModal } from '../../../components/checkout/ApplyCouponModal'
 import { CheckoutAddressModal } from '../../../components/checkout/CheckoutAddressModal';
 import { CheckoutSkeleton } from '../../../components/shared/CheckoutSkeleton';
 import { CouponData, couponService } from '../../../services/customer/coupon.service';
+import { OrderSuccessModal } from '../../../components/shared/OrderSuccessModal';
 
 // Simple Haversine fallback to avoid extra dep
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -51,7 +54,7 @@ export const CheckoutScreen = () => {
     const route = useRoute<RouteProp<{ params: CheckoutRouteParams }, 'params'>>();
     const { addressId: routeAddressId, showAddressModal } = route.params || {};
 
-    const { items, getTotalPrice, clearCart, addToCart, removeFromCart, deleteFromCart, getItemQuantity } = useCartStore();
+    const { items, getTotalPrice, clearCart, addToCart, removeFromCart, deleteFromCart, getItemQuantity, updateQuantity, updateItemStock } = useCartStore();
     const { showToast } = useToastStore();
     const { user } = useAuthStore();
     const { normalProducts } = useHomeStore();
@@ -93,6 +96,43 @@ export const CheckoutScreen = () => {
     const [stockErrors, setStockErrors] = useState<Record<string, { status: string, message: string, available: number }>>({});
     const [hasCriticalStockIssue, setHasCriticalStockIssue] = useState(false);
 
+    // Order Success Modal State
+    const [successModalVisible, setSuccessModalVisible] = useState(false);
+    const [modalConfig, setModalConfig] = useState<{
+        type: 'success' | 'error' | 'loading';
+        title: string;
+        message: string;
+        primaryButtonText: string;
+        secondaryButtonText?: string;
+        onPrimaryPress: () => void;
+        onSecondaryPress?: () => void;
+    }>({
+        type: 'loading',
+        title: '',
+        message: '',
+        primaryButtonText: '',
+        onPrimaryPress: () => { },
+    });
+
+    // Debounced Quantity Sync
+    const debouncedSync = useMemo(
+        () => debounce(async (inventoryId: string, qty: number) => {
+            try {
+                const response = await productService.updateCartItemQty(inventoryId, qty);
+                if (response.success) {
+                    // Sync back with backend decision
+                    updateQuantity(inventoryId, response.finalQty);
+                    if (response.message) {
+                        showToast(response.message);
+                    }
+                }
+            } catch (err) {
+                console.error('[Checkout] Sync failed:', err);
+            }
+        }, 300),
+        []
+    );
+
     const insets = useSafeAreaInsets();
 
     // Function to validate stock for all items in cart
@@ -110,24 +150,62 @@ export const CheckoutScreen = () => {
 
             const errors: Record<string, any> = {};
             let criticalIssue = false;
+            let reductionNotice = "";
 
             result.items.forEach(item => {
+                // Find specifically by the unique variant ID we use in cart
+                const cartItem = items.find(i => (i.product._id === item.inventoryId || i.product.inventoryId === item.inventoryId));
+
                 if (!item.available) {
                     errors[item.inventoryId] = {
                         status: item.status,
                         message: item.message,
                         available: item.availableStock
                     };
+
                     if (item.status === 'OUT_OF_STOCK' || item.status === 'NOT_FOUND') {
                         criticalIssue = true;
+                        // Automatically set quantity to zero in cart if it was above 0
+                        // This keeps it in the list but marks it as 0
+                        if (cartItem && cartItem.quantity > 0) {
+                            updateQuantity(item.inventoryId, 0);
+                            reductionNotice += `- ${cartItem.product.name}: Marked as Out of Stock\n`;
+                        }
+                        // Update cached stock to 0
+                        updateItemStock(item.inventoryId, 0);
+                    } else if (item.status === 'INSUFFICIENT_STOCK') {
+                        // Automatically reduce quantity in cart
+                        if (cartItem && cartItem.quantity > item.availableStock) {
+                            // Update cart to exactly the available stock
+                            updateQuantity(item.inventoryId, item.availableStock);
+                            reductionNotice += `- ${cartItem.product.name}: Reduced to ${item.availableStock} (Available stock)\n`;
+                        }
+                        // Update cached stock with fresh value
+                        updateItemStock(item.inventoryId, item.availableStock);
                     }
+                } else {
+                    // Item is available - update cached stock with fresh value from backend
+                    updateItemStock(item.inventoryId, item.availableStock);
                 }
             });
 
             setStockErrors(errors);
             setHasCriticalStockIssue(criticalIssue);
 
-            if (forceAlert && !result.allAvailable) {
+            if (reductionNotice) {
+                setModalConfig({
+                    type: 'error',
+                    title: 'Quantity Adjusted',
+                    message: `Some items in your cart had limited stock and were adjusted:\n\n${reductionNotice}`,
+                    primaryButtonText: 'Continue Shopping',
+                    onPrimaryPress: () => {
+                        setSuccessModalVisible(false);
+                    },
+                });
+                setSuccessModalVisible(true);
+            }
+
+            if (forceAlert && !result.allAvailable && !reductionNotice) {
                 Alert.alert("Stock Update", result.message);
             }
 
@@ -140,16 +218,33 @@ export const CheckoutScreen = () => {
         }
     };
 
-    // Re-validate stock when items in cart change
+    // Clear stock errors for items that are no longer in cart
     useEffect(() => {
-        const timer = setTimeout(() => {
-            if (items.length > 0) {
-                validateStock();
-            }
-        }, 500); // Debounce validation
+        if (Object.keys(stockErrors).length > 0) {
+            // Get current inventory IDs from cart (using product._id as the key)
+            const currentInventoryIds = new Set(items.map(item => item.product._id));
+            const updatedErrors: Record<string, { status: string, message: string, available: number }> = {};
+            let hasCritical = false;
 
-        return () => clearTimeout(timer);
+            // Keep only errors for items still in cart
+            Object.entries(stockErrors).forEach(([inventoryId, error]) => {
+                if (currentInventoryIds.has(inventoryId)) {
+                    updatedErrors[inventoryId] = error;
+                    if (error.status === 'OUT_OF_STOCK') {
+                        hasCritical = true;
+                    }
+                }
+            });
+
+            // Update state if errors changed
+            if (Object.keys(updatedErrors).length !== Object.keys(stockErrors).length) {
+                setStockErrors(updatedErrors);
+                setHasCriticalStockIssue(hasCritical);
+            }
+        }
     }, [items]);
+
+    // Stock validation removed from mount - now only validates after address selection or before order placement
 
     // Function to load address and branch data
     const loadAddressData = async (addrId: string) => {
@@ -178,6 +273,11 @@ export const CheckoutScreen = () => {
                     const safeDist = branch.distance ?? 0;
                     setDistanceKm(Number(safeDist.toFixed(1)));
                     setDeliveryCharge(orderService.calculateDeliveryCharge(safeDist));
+
+                    // Validate stock after address is selected
+                    if (items.length > 0) {
+                        validateStock();
+                    }
                 } catch (e) {
                     logger.warn('No branch found for address', e);
                     setServiceAvailable(false);
@@ -241,7 +341,23 @@ export const CheckoutScreen = () => {
 
 
     // Derived Data - Cart only mode
-    const displayItems = items;
+    // Derived Data - Cart only mode
+    const displayItems = useMemo(() => {
+        return [...items].sort((a, b) => {
+            const idA = a.product.inventoryId || a.product._id;
+            const idB = b.product.inventoryId || b.product._id;
+            const errA = stockErrors[idA];
+            const errB = stockErrors[idB];
+
+            const isOOSA = a.quantity === 0 || errA?.status === 'OUT_OF_STOCK' || errA?.status === 'NOT_FOUND';
+            const isOOSB = b.quantity === 0 || errB?.status === 'OUT_OF_STOCK' || errB?.status === 'NOT_FOUND';
+
+            // Out of stock items at the top
+            if (isOOSA && !isOOSB) return -1;
+            if (!isOOSA && isOOSB) return 1;
+            return 0;
+        });
+    }, [items, stockErrors]);
 
     const cartTotal = getTotalPrice();
     const finalDeliveryCharge = deliveryHigh;
@@ -286,14 +402,15 @@ export const CheckoutScreen = () => {
     }, [allocatedBranch?._id, user?._id]);
 
     // Suggestions for "Before you checkout" - sorted by discount percentage
+    // Products are now flattened with embedded variant/pricing data
     const suggestionProducts = useMemo(() => {
         if (!normalProducts || normalProducts.length === 0) return [];
         return [...normalProducts]
-            .filter(p => !items.find(i => i.product._id === p._id || i.product.inventoryId === p._id))
-            .map(p => {
-                const variant = (p as any).variants?.[0] || p.variant;
-                const mrp = variant?.pricing?.mrp || 0;
-                const sp = variant?.pricing?.sellingPrice || 0;
+            .filter((p: any) => !items.find(i => i.product._id === p._id || i.product.inventoryId === p.inventoryId))
+            .map((p: any) => {
+                // Use embedded pricing from flattened product
+                const mrp = p.pricing?.mrp || 0;
+                const sp = p.pricing?.sellingPrice || 0;
                 const discountPercent = mrp > 0 ? ((mrp - sp) / mrp) * 100 : 0;
                 return { ...p, discountPercent };
             })
@@ -361,6 +478,16 @@ export const CheckoutScreen = () => {
         const isStockAvailable = await validateStock(true);
         if (!isStockAvailable) return;
 
+        // Show loading modal
+        setModalConfig({
+            type: 'loading',
+            title: 'Placing Order',
+            message: 'Please wait while we process your order...',
+            primaryButtonText: '',
+            onPrimaryPress: () => { },
+        });
+        setSuccessModalVisible(true);
+
         setPlacingOrder(true);
 
         try {
@@ -425,12 +552,33 @@ export const CheckoutScreen = () => {
                         amount: grandTotal
                     });
 
-                    notifyOrderPlaced(createdOrderId!);
-                    clearCart();
-                    Alert.alert("Order Placed", "Your order is on the way!", [
-                        { text: "Track Order", onPress: () => navigation.navigate('OrderTracking', { orderId: createdOrderId, from: 'checkout' }) },
-                        { text: "Home", onPress: () => navigation.navigate('Home') }
-                    ]);
+                    try {
+                        notifyOrderPlaced(createdOrderId!);
+                    } catch (notifError) {
+                        logger.error('Notification error (non-blocking):', notifError);
+                    }
+                    // clearCart(); // Delay clearing cart until modal action
+                    setModalConfig({
+                        type: 'success',
+                        title: 'Order Placed Successfully',
+                        message: 'Your order is on the way!',
+                        primaryButtonText: 'Track Order',
+                        secondaryButtonText: 'Continue Shopping',
+                        onPrimaryPress: () => {
+                            clearCart(); // Clear cart here
+                            setSuccessModalVisible(false);
+                            navigation.navigate('OrderTracking', { orderId: createdOrderId, from: 'checkout' });
+                        },
+                        onSecondaryPress: () => {
+                            clearCart(); // Clear cart here
+                            setSuccessModalVisible(false);
+                            navigation.navigate('Home');
+                        },
+                    });
+                    // Use setTimeout to ensure config is set before showing modal
+                    setTimeout(() => {
+                        setSuccessModalVisible(true);
+                    }, 100);
                 }).catch(async (error: any) => {
                     logger.error('Payment Error', error);
                     if (createdOrderId) {
@@ -441,12 +589,30 @@ export const CheckoutScreen = () => {
                             logger.error('Failed to cleanup order:', cleanupErr);
                         }
                     }
-                    Alert.alert("Payment Cancelled", "Your payment was not completed. The order has been cancelled.");
+                    setModalConfig({
+                        type: 'error',
+                        title: 'Payment Cancelled',
+                        message: 'Your payment was not completed. The order has been cancelled.',
+                        primaryButtonText: 'Continue Shopping',
+                        onPrimaryPress: () => {
+                            setSuccessModalVisible(false);
+                        },
+                    });
+                    setSuccessModalVisible(true);
                 });
             } catch (orderError: any) {
                 logger.error('Order creation error:', orderError);
                 const errorMessage = orderError.response?.data?.message || orderError.response?.data?.error || orderError.message || "Failed to process order. Please try again.";
-                Alert.alert("Order Error", errorMessage);
+                setModalConfig({
+                    type: 'error',
+                    title: 'Order Error',
+                    message: errorMessage,
+                    primaryButtonText: 'Try Again',
+                    onPrimaryPress: () => {
+                        setSuccessModalVisible(false);
+                    },
+                });
+                setSuccessModalVisible(true);
                 if (createdOrderId) {
                     try {
                         await orderService.deletePendingOrder(createdOrderId);
@@ -471,6 +637,16 @@ export const CheckoutScreen = () => {
         // Final stock check before order
         const isStockAvailable = await validateStock(true);
         if (!isStockAvailable) return;
+
+        // Show loading modal
+        setModalConfig({
+            type: 'loading',
+            title: 'Placing Order',
+            message: 'Please wait while we confirm your order...',
+            primaryButtonText: '',
+            onPrimaryPress: () => { },
+        });
+        setSuccessModalVisible(true);
 
         setPlacingOrder(true);
 
@@ -499,16 +675,48 @@ export const CheckoutScreen = () => {
             // Mark as COD
             await orderService.createCodOrder(createdOrderId);
 
-            notifyOrderPlaced(createdOrderId);
-            clearCart();
-            Alert.alert("Order Placed", "Your order is confirmed! Pay on delivery.", [
-                { text: "Track Order", onPress: () => navigation.navigate('OrderTracking', { orderId: createdOrderId, from: 'checkout' }) },
-                { text: "Home", onPress: () => navigation.navigate('Home') }
-            ]);
+            try {
+                notifyOrderPlaced(createdOrderId);
+            } catch (notifError) {
+                logger.error('Notification error (non-blocking):', notifError);
+            }
+            // clearCart(); // Delay clearing cart until modal action
+            logger.log('Setting success modal config and visibility...');
+            setModalConfig({
+                type: 'success',
+                title: 'Order Placed Successfully',
+                message: 'Your order is confirmed! Pay on delivery.',
+                primaryButtonText: 'Track Order',
+                secondaryButtonText: 'Continue Shopping',
+                onPrimaryPress: () => {
+                    clearCart(); // Clear cart here
+                    setSuccessModalVisible(false);
+                    navigation.navigate('OrderTracking', { orderId: createdOrderId, from: 'checkout' });
+                },
+                onSecondaryPress: () => {
+                    clearCart(); // Clear cart here
+                    setSuccessModalVisible(false);
+                    navigation.navigate('Home');
+                },
+            });
+            // Use setTimeout to ensure config is set before showing modal
+            setTimeout(() => {
+                setSuccessModalVisible(true);
+                logger.log('Success modal should now be visible');
+            }, 100);
         } catch (error: any) {
             logger.error('COD order error:', error);
             const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || "Failed to place COD order. Please try again.";
-            Alert.alert("Order Error", errorMessage);
+            setModalConfig({
+                type: 'error',
+                title: 'Order Error',
+                message: errorMessage,
+                primaryButtonText: 'Try Again',
+                onPrimaryPress: () => {
+                    setSuccessModalVisible(false);
+                },
+            });
+            setSuccessModalVisible(true);
         } finally {
             setPlacingOrder(false);
         }
@@ -517,6 +725,7 @@ export const CheckoutScreen = () => {
     const renderItem = ({ item }: { item: any }) => {
         const inventoryId = item.product.inventoryId || item.product._id;
         const stockError = stockErrors[inventoryId];
+        const isActuallyOutOfStock = stockError?.status === 'OUT_OF_STOCK' || stockError?.status === 'NOT_FOUND' || item.quantity === 0;
 
         const handleDecrease = () => {
             if (item.quantity <= 0) {
@@ -532,44 +741,45 @@ export const CheckoutScreen = () => {
         };
 
         return (
-            <View style={[styles.itemRow, stockError && { borderColor: colors.error, borderWidth: 1, borderRadius: 12, padding: 8, backgroundColor: colors.error + '05' }]}>
+            <View style={[
+                styles.itemRow,
+                stockError && { borderColor: colors.error, borderWidth: 1, borderRadius: 12, padding: 8, backgroundColor: colors.error + '05' },
+                isActuallyOutOfStock && styles.oosItemRow
+            ]}>
                 {/* Image */}
-                <View style={styles.itemImagePlaceholder}>
-                    {item.product.images?.[0] ? (
-                        <Image source={{ uri: item.product.images[0] }} style={{ width: '100%', height: '100%', borderRadius: 8 }} resizeMode="cover" />
+                <View style={[styles.itemImagePlaceholder, isActuallyOutOfStock && styles.oosImageContainer]}>
+                    {(item.product.image || item.product.images?.[0]) ? (
+                        <Image
+                            source={{ uri: item.product.image || item.product.images[0] }}
+                            style={[{ width: '100%', height: '100%', borderRadius: 8 }, isActuallyOutOfStock && { opacity: 0.4 }]}
+                            resizeMode="cover"
+                        />
                     ) : (
                         <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
                             <Path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
                         </Svg>
                     )}
+                    {isActuallyOutOfStock && (
+                        <View style={styles.oosImageBadge}>
+                            <MonoText size="xxs" weight="bold" color={colors.white}>OOS</MonoText>
+                        </View>
+                    )}
                 </View>
 
                 {/* Info */}
                 <View style={{ flex: 1, marginLeft: 12 }}>
-                    <MonoText size="s" weight="bold" numberOfLines={1}>{item.product.name}</MonoText>
-                    <MonoText size="xs" color={colors.textLight}>
+                    <MonoText size="s" weight="bold" numberOfLines={1} style={isActuallyOutOfStock && styles.oosTextGray}>{item.product.name}</MonoText>
+                    <MonoText size="xs" color={colors.textLight} style={isActuallyOutOfStock && styles.oosOpacitySmall}>
                         {typeof item.product.quantity === 'object'
                             ? `${item.product.quantity.value} ${item.product.quantity.unit}`
                             : item.product.unit || 'Nos'}
                     </MonoText>
 
                     {/* Price moved here - below quality/variant */}
-                    <View style={{ marginTop: 4 }}>
+                    <View style={[{ marginTop: 4 }, isActuallyOutOfStock && styles.oosOpacitySmall]}>
                         <MonoText size="s" weight="bold">
-                            ₹{(item.product.discountPrice ?? item.product.price ?? 0) * item.quantity}
+                            ₹{(item.product.discountPrice ?? item.product.price ?? 0) * (item.quantity || 1)}
                         </MonoText>
-                        {(() => {
-                            const mrp = item.product.price || 0;
-                            const sp = item.product.discountPrice ?? item.product.price ?? 0;
-                            if (mrp > sp) {
-                                return (
-                                    <MonoText size="xs" color={colors.textLight} style={{ textDecorationLine: 'line-through' }}>
-                                        ₹{mrp * item.quantity}
-                                    </MonoText>
-                                );
-                            }
-                            return null;
-                        })()}
                     </View>
 
                     {/* Stock Error Message */}
@@ -587,43 +797,65 @@ export const CheckoutScreen = () => {
                     )}
                 </View>
 
-                {/* Right Column: Counter only */}
+                {/* Right Column: Counter or OOS Button */}
                 <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
-                    {/* Quantity Controls - White background style */}
-                    <View style={styles.checkoutQtyContainer}>
+                    {isActuallyOutOfStock ? (
                         <TouchableOpacity
-                            onPress={handleDecrease}
-                            style={styles.checkoutQtyBtn}
-                        >
-                            <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3">
-                                <Line x1="5" y1="12" x2="19" y2="12" />
-                            </Svg>
-                        </TouchableOpacity>
-
-                        <View style={styles.checkoutQtyValue}>
-                            <MonoText size="s" weight="bold">{item.quantity}</MonoText>
-                        </View>
-
-                        <TouchableOpacity
+                            style={styles.oosButtonSmall}
                             onPress={() => {
-                                const success = addToCart(item.product);
-                                if (!success) {
-                                    const currentQuantity = getItemQuantity(item.product._id);
-                                    if (currentQuantity >= (item.product.stock || 0)) {
-                                        showToast('Maximum stock limit reached!');
-                                    } else {
-                                        showToast('Product is out of stock!');
-                                    }
-                                }
+                                setItemToRemove(item);
+                                setRemoveItemModalVisible(true);
                             }}
-                            style={styles.checkoutQtyBtn}
                         >
-                            <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3">
-                                <Line x1="12" y1="5" x2="12" y2="19" />
-                                <Line x1="5" y1="12" x2="19" y2="12" />
-                            </Svg>
+                            <MonoText size="xxs" weight="bold" color={colors.error}>REMOVE</MonoText>
                         </TouchableOpacity>
-                    </View>
+                    ) : (
+                        <View style={styles.checkoutQtyContainer}>
+                            <TouchableOpacity
+                                onPress={() => {
+                                    const newQty = item.quantity - 1;
+                                    if (newQty <= 0) {
+                                        setItemToRemove(item);
+                                        setRemoveItemModalVisible(true);
+                                        return;
+                                    }
+
+                                    // 1. Optimistic Update (Immediate Feedback)
+                                    updateQuantity(inventoryId, newQty);
+
+                                    // 2. Debounced Sync (Backend Decision)
+                                    debouncedSync(inventoryId, newQty);
+                                }}
+                                style={styles.checkoutQtyBtn}
+                            >
+                                <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3">
+                                    <Line x1="5" y1="12" x2="19" y2="12" />
+                                </Svg>
+                            </TouchableOpacity>
+
+                            <View style={styles.checkoutQtyValue}>
+                                <MonoText size="s" weight="bold">{item.quantity}</MonoText>
+                            </View>
+
+                            <TouchableOpacity
+                                onPress={() => {
+                                    const newQty = item.quantity + 1;
+
+                                    // 1. Optimistic Update
+                                    updateQuantity(inventoryId, newQty);
+
+                                    // 2. Debounced Sync
+                                    debouncedSync(inventoryId, newQty);
+                                }}
+                                style={styles.checkoutQtyBtn}
+                            >
+                                <Svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="3">
+                                    <Line x1="12" y1="5" x2="12" y2="19" />
+                                    <Line x1="5" y1="12" x2="19" y2="12" />
+                                </Svg>
+                            </TouchableOpacity>
+                        </View>
+                    )}
                 </View>
             </View>
         );
@@ -713,7 +945,7 @@ export const CheckoutScreen = () => {
         );
     }
 
-    // Empty cart/subscription check
+    // Empty cart
     if (displayItems.length === 0) {
         return (
             <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: spacing.xl }]}>
@@ -753,6 +985,23 @@ export const CheckoutScreen = () => {
 
             <ScrollView contentContainerStyle={styles.content}>
 
+                {/* Critical Stock Issue Banner */}
+                {hasCriticalStockIssue && (
+                    <View style={styles.criticalStockBanner}>
+                        <View style={styles.criticalStockIcon}>
+                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2.5">
+                                <Circle cx="12" cy="12" r="10" />
+                                <Line x1="12" y1="8" x2="12" y2="12" />
+                                <Line x1="12" y1="16" x2="12.01" y2="16" />
+                            </Svg>
+                        </View>
+                        <View style={{ flex: 1, marginLeft: 12 }}>
+                            <MonoText size="s" weight="bold" color="#991B1B">Some items are Out of Stock</MonoText>
+                            <MonoText size="xs" color="#B91C1C">Please remove them to proceed with your order</MonoText>
+                        </View>
+                    </View>
+                )}
+
                 {/* 1. Product Details (Order Items) - TOP */}
                 <View style={styles.section}>
                     <MonoText size="m" weight="bold" style={{ marginBottom: 16 }}>Order Items</MonoText>
@@ -775,19 +1024,27 @@ export const CheckoutScreen = () => {
                             horizontal
                             data={suggestionProducts}
                             showsHorizontalScrollIndicator={false}
-                            keyExtractor={(p) => p._id}
+                            keyExtractor={(p) => `${p._id}_${p.inventoryId}`}
                             contentContainerStyle={{ paddingRight: spacing.l }}
                             ItemSeparatorComponent={() => <View style={{ width: 14 }} />}
                             renderItem={({ item: p }) => {
-                                const variant = (p as any).variants?.[0] || p.variant;
-                                const cartItemId = variant?._id || variant?.inventoryId || p._id;
+                                // Products now have embedded variant data from flattened API
+                                const variantData = {
+                                    _id: p.inventoryId,
+                                    inventoryId: p.inventoryId,
+                                    variant: p.variant,
+                                    pricing: p.pricing,
+                                    stock: p.stock,
+                                    isAvailable: p.isAvailable
+                                };
+                                const cartItemId = p.inventoryId || p._id;
                                 return (
                                     <ProductGridCard
                                         product={p}
-                                        variant={variant}
+                                        variant={variantData}
                                         quantity={getItemQuantity(cartItemId)}
                                         width={160}
-                                        onPress={() => handleProductPress(p, variant?.inventoryId)}
+                                        onPress={() => handleProductPress(p, p.inventoryId)}
                                         onAddToCart={handleAddToCartFromSuggestions}
                                         onRemoveFromCart={removeFromCart}
                                     />
@@ -1000,7 +1257,7 @@ export const CheckoutScreen = () => {
                                 handleCodPayment();
                             }
                         }}
-                        disabled={placingOrder || isOutOfRange || !address || hasCriticalStockIssue}
+                        disabled={placingOrder || isOutOfRange || !address || hasCriticalStockIssue || items.some(i => i.quantity <= 0)}
                     >
                         <View style={styles.payBtnContent}>
                             <MonoText weight="bold" color={colors.white} size="m">
@@ -1251,6 +1508,19 @@ export const CheckoutScreen = () => {
                 onAddNewAddress={handleAddNewAddress}
                 selectedAddressId={selectedAddressId}
             />
+
+            {/* Order Success/Error Modal */}
+            <OrderSuccessModal
+                visible={successModalVisible}
+                type={modalConfig.type}
+                title={modalConfig.title}
+                message={modalConfig.message}
+                primaryButtonText={modalConfig.primaryButtonText}
+                secondaryButtonText={modalConfig.secondaryButtonText}
+                onPrimaryPress={modalConfig.onPrimaryPress}
+                onSecondaryPress={modalConfig.onSecondaryPress}
+                onClose={() => setSuccessModalVisible(false)}
+            />
         </View>
     );
 };
@@ -1428,6 +1698,42 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    oosItemRow: {
+        backgroundColor: colors.border + '15',
+        padding: 8,
+        borderRadius: 12,
+        marginBottom: 8,
+        opacity: 0.9,
+    },
+    oosImageContainer: {
+        backgroundColor: colors.border,
+        overflow: 'hidden',
+    },
+    oosImageBadge: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.2)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    oosTextGray: {
+        color: colors.textLight,
+        textDecorationLine: 'line-through',
+    },
+    oosOpacitySmall: {
+        opacity: 0.5,
+    },
+    oosButtonSmall: {
+        paddingVertical: 5,
+        paddingHorizontal: 10,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: colors.error,
+        backgroundColor: colors.error + '08',
+    },
     payBtn: {
         flex: 1,
         height: 56,
@@ -1460,6 +1766,24 @@ const styles = StyleSheet.create({
         marginBottom: 12,
         borderWidth: 2,
         borderColor: '#FECACA',
+    },
+    criticalStockBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FEF2F2',
+        padding: 16,
+        borderRadius: 16,
+        marginBottom: 16,
+        borderWidth: 1.5,
+        borderColor: '#FECACA',
+    },
+    criticalStockIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#DC2626',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     warningIconContainer: {
         width: 44,

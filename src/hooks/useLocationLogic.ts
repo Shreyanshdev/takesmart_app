@@ -34,43 +34,15 @@ export const useLocationLogic = () => {
         initialize();
     }, []);
 
-    // Reverse geocode when branch changes (to get display address)
+    // Simplified address logic: Use branch name or address
     useEffect(() => {
-        if (currentBranch?.location) {
-            reverseGeocode(currentBranch.location.latitude, currentBranch.location.longitude);
+        if (currentBranch) {
+            // Priority: Branch Address -> Branch Name
+            setCurrentAddress(currentBranch.address || currentBranch.name);
+        } else {
+            setCurrentAddress(null);
         }
     }, [currentBranch]);
-
-    const reverseGeocode = async (lat: number, lng: number) => {
-        try {
-            const response = await axios.get(
-                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${ENV.GOOGLE_MAPS_API_KEY}`
-            );
-            if (response.data.results.length > 0) {
-                // Get a short address (locality, city)
-                const components = response.data.results[0].address_components;
-                let locality = '';
-                let city = '';
-
-                for (const comp of components) {
-                    if (comp.types.includes('locality')) {
-                        locality = comp.short_name;
-                    }
-                    if (comp.types.includes('administrative_area_level_2')) {
-                        city = comp.short_name;
-                    }
-                }
-
-                setCurrentAddress(locality || city || response.data.results[0].formatted_address);
-            }
-        } catch (error) {
-            logger.warn('Reverse geocode failed:', error);
-            // Use branch name as fallback
-            if (currentBranch?.name) {
-                setCurrentAddress(currentBranch.name);
-            }
-        }
-    };
 
     const requestPermission = useCallback(async () => {
         await requestGPSAndFetchBranch();

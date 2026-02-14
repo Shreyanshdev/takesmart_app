@@ -262,7 +262,8 @@ export const ApplyCouponModal: React.FC<ApplyCouponModalProps> = ({
         >
             <View style={styles.container}>
                 {/* Glass Header */}
-                <BlurView blurType="light" blurAmount={20} style={[styles.header, { paddingTop: insets.top }]}>
+                <View style={[styles.header, { paddingTop: Platform.OS === 'android' ? insets.top + 10 : insets.top }]}>
+                    <BlurView blurType="light" blurAmount={20} style={StyleSheet.absoluteFill} />
                     <View style={styles.headerContent}>
                         {/* Back Button */}
                         <TouchableOpacity onPress={onClose} style={styles.headerBtn}>
@@ -316,7 +317,7 @@ export const ApplyCouponModal: React.FC<ApplyCouponModalProps> = ({
                             </MonoText>
                         </View>
                     )}
-                </BlurView>
+                </View>
 
                 {/* Error Message */}
                 {error && (
@@ -383,7 +384,12 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         zIndex: 10,
-        backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        ...Platform.select({
+            android: {
+                elevation: 4,
+            }
+        })
     },
     headerContent: {
         flexDirection: 'row',

@@ -43,10 +43,15 @@ export const OrderTrackingScreen = () => {
     const [partnerLocation, setPartnerLocation] = useState<{ latitude: number, longitude: number } | null>(null);
     const [routeData, setRouteData] = useState<{ distance: string; duration: string } | null>(null);
     const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
-    const [status, setStatus] = useState<string>('confirmed'); // pending, confirmed, preparing, out_for_delivery, delivered, cancelled
+    const [status, setStatus] = useState<string>(''); // pending, confirmed, preparing, out_for_delivery, delivered, cancelled
     const [activeTab, setActiveTab] = useState<'status' | 'details'>('status');
     const [showMap, setShowMap] = useState(false);
     const [tabContainerWidth, setTabContainerWidth] = useState(0);
+
+    const showMapRef = useRef(showMap);
+    useEffect(() => {
+        showMapRef.current = showMap;
+    }, [showMap]);
 
     const mapRef = useRef<MapView>(null);
     const socketRef = useRef<Socket | null>(null);
@@ -59,6 +64,9 @@ export const OrderTrackingScreen = () => {
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
     })).current;
+
+    const lastPartnerLocRef = useRef<{ latitude: number, longitude: number } | null>(null);
+    const hasInitialFitRef = useRef(false);
 
     const mapHeight = useSharedValue(0);
     const tabOffset = useSharedValue(0);
@@ -80,7 +88,22 @@ export const OrderTrackingScreen = () => {
     const animatedMapStyle = useAnimatedStyle(() => {
         return {
             height: mapHeight.value,
-            opacity: interpolate(mapHeight.value, [0, MAP_HEIGHT_EXPANDED * 0.2, MAP_HEIGHT_EXPANDED], [0, 0, 1]),
+            opacity: interpolate(mapHeight.value, [0, MAP_HEIGHT_EXPANDED * 0.1, MAP_HEIGHT_EXPANDED], [0, 0.5, 1]),
+        };
+    });
+
+    const animatedEtaCardStyle = useAnimatedStyle(() => {
+        return {
+            opacity: interpolate(mapHeight.value, [MAP_HEIGHT_EXPANDED * 0.4, MAP_HEIGHT_EXPANDED], [0, 1]),
+            transform: [{ translateY: interpolate(mapHeight.value, [MAP_HEIGHT_EXPANDED * 0.4, MAP_HEIGHT_EXPANDED], [10, 0]) }],
+        };
+    });
+
+    const animatedInlineCardStyle = useAnimatedStyle(() => {
+        return {
+            opacity: interpolate(mapHeight.value, [0, MAP_HEIGHT_EXPANDED * 0.3], [1, 0]),
+            transform: [{ translateY: interpolate(mapHeight.value, [0, MAP_HEIGHT_EXPANDED * 0.3], [0, -10]) }],
+            display: (mapHeight.value > MAP_HEIGHT_EXPANDED * 0.4 ? 'none' : 'flex') as any,
         };
     });
 
@@ -127,6 +150,7 @@ export const OrderTrackingScreen = () => {
                             longitudeDelta: 0.01,
                         });
                         setPartnerLocation({ latitude, longitude });
+                        lastPartnerLocRef.current = { latitude, longitude };
                     }
 
                     // If delivered, fetch existing reviews for this order
@@ -158,9 +182,8 @@ export const OrderTrackingScreen = () => {
         fetchOrderData();
     }, [orderId]);
 
-    // Socket Connection (Only for active orders)
     useEffect(() => {
-        if (!orderId || isPastOrder) return;
+        if (!orderId || !isActiveOrder) return;
 
         socketRef.current = io(ENV.SOCKET_URL, {
             transports: ['websocket'],
@@ -174,26 +197,41 @@ export const OrderTrackingScreen = () => {
         });
 
         socket.on('driverLocation', (data: { latitude: number, longitude: number }) => {
-            logger.log('Driver location update (legacy):', data);
+            // logger.log('Driver location update (legacy):', data);
+
+            // 1. Move animated marker (Always do this for smooth transition when opening)
             (partnerLocationAnimated.timing({
                 latitude: data.latitude,
                 longitude: data.longitude,
                 duration: 2000,
                 useNativeDriver: false
             } as any) as any).start();
-            setPartnerLocation({ latitude: data.latitude, longitude: data.longitude });
+
+            // 2. Only update state if map is visible to save CPU/GPU re-renders
+            lastPartnerLocRef.current = { latitude: data.latitude, longitude: data.longitude };
+            if (showMapRef.current) {
+                setPartnerLocation({ latitude: data.latitude, longitude: data.longitude });
+            }
         });
 
         socket.on('deliveryPartnerLocationUpdate', (data: any) => {
-            logger.log('Enhanced delivery location update:', data);
+            // logger.log('Enhanced delivery location update:', data);
             if (data.location) {
+                // 1. Update animated marker (Warm start for map)
                 (partnerLocationAnimated.timing({
                     latitude: data.location.latitude,
                     longitude: data.location.longitude,
                     duration: 2000,
                     useNativeDriver: false
                 } as any) as any).start();
-                setPartnerLocation(data.location);
+
+                // 2. Only update coordinate state if map is shown
+                lastPartnerLocRef.current = data.location;
+                if (showMapRef.current) {
+                    setPartnerLocation(data.location);
+                }
+
+                // 3. ALWAYS update ETA/Distance (Light update for card)
                 if (data.eta !== undefined) {
                     setRouteData(prev => ({
                         distance: data.routeData?.distance?.text || prev?.distance || '--',
@@ -240,52 +278,55 @@ export const OrderTrackingScreen = () => {
 
     // Fit Map to show all markers and route
     useEffect(() => {
-        if (order && mapRef.current) {
-            const markers: { latitude: number; longitude: number }[] = [];
-            const hasPartner = !!order.deliveryPartner;
-
-            // User Location (Prioritize deliveryLocation from new API structure)
-            const userLoc = order.deliveryLocation || order.shippingAddress;
-            if (userLoc?.latitude) {
-                markers.push({
-                    latitude: userLoc.latitude,
-                    longitude: userLoc.longitude
-                });
-            }
-
-            // Partner Location - ONLY include if partner is assigned and has location
-            if (hasPartner && partnerLocation) {
-                markers.push(partnerLocation);
-            }
-
-            // Branch Location - always show when no partner, or when partner not picked up yet
-            if (order.pickupLocation?.latitude) {
-                markers.push({
-                    latitude: order.pickupLocation.latitude,
-                    longitude: order.pickupLocation.longitude
-                });
-            }
-
-            // Include route start/end for better fit (use first and last route points)
-            if (routeCoordinates.length > 0) {
-                markers.push(routeCoordinates[0]);
-                markers.push(routeCoordinates[routeCoordinates.length - 1]);
-            }
-
-            console.log('>>> Fitting map <<<', {
-                hasPartner,
-                markersCount: markers.length,
-                routeCoordsCount: routeCoordinates.length
-            });
-
-            if (markers.length > 0) {
-                mapRef.current.fitToCoordinates(markers, {
-                    edgePadding: { top: 100, right: 50, bottom: 100, left: 50 },
-                    animated: true,
-                });
-            }
+        // PRODUCTION FIX: Only fit when map is visible AND specifically when:
+        // 1. Map is opened
+        // 2. Order/Partner status changes
+        // 3. New route coordinates are fetched
+        if (!showMap || !order || !mapRef.current) {
+            return;
         }
-    }, [partnerLocation, order, routeCoordinates]);
+
+        const markers: { latitude: number; longitude: number }[] = [];
+        const hasPartner = !!order.deliveryPartner;
+
+        // User Location
+        const userLoc = order.deliveryLocation || order.shippingAddress;
+        if (userLoc?.latitude) {
+            markers.push({
+                latitude: userLoc.latitude,
+                longitude: userLoc.longitude
+            });
+        }
+
+        // Partner Location
+        if (hasPartner && partnerLocation) {
+            markers.push(partnerLocation);
+        }
+
+        // Branch Location
+        if (order.pickupLocation?.latitude) {
+            markers.push({
+                latitude: order.pickupLocation.latitude,
+                longitude: order.pickupLocation.longitude
+            });
+        }
+
+        // Include route start/end for better fit
+        if (routeCoordinates.length > 0) {
+            markers.push(routeCoordinates[0]);
+            markers.push(routeCoordinates[routeCoordinates.length - 1]);
+        }
+
+        if (markers.length > 0) {
+            // console.log('📍 Executing fitToCoordinates (Throttled/Guarded)');
+            mapRef.current.fitToCoordinates(markers, {
+                edgePadding: { top: 100, right: 50, bottom: 100, left: 50 },
+                animated: true,
+            });
+            hasInitialFitRef.current = true;
+        }
+    }, [showMap, order?.deliveryPartner, routeCoordinates.length]);
+    // Specifically NOT partnerLocation to avoid camera jitter during live updates
 
     // Helper function to decode Google polyline
     const decodePolyline = (encoded: string): { latitude: number; longitude: number }[] => {
@@ -329,10 +370,10 @@ export const OrderTrackingScreen = () => {
         return points;
     };
 
-    // Fetch route data - works in all order states
     useEffect(() => {
         const fetchRouteData = async () => {
-            if (!order) {
+            // Only fetch full route if map is visible OR if we don't have route data yet
+            if (!order || !isActiveOrder || (!showMap && routeData)) {
                 return;
             }
 
@@ -446,7 +487,7 @@ export const OrderTrackingScreen = () => {
         };
 
         fetchRouteData();
-    }, [partnerLocation, order, orderId, status]);
+    }, [partnerLocation, order, orderId, status, showMap]);
 
 
     const renderStatusStep = (stepStatus: string, label: string, isCompleted: boolean, isActive: boolean) => (
@@ -539,6 +580,7 @@ export const OrderTrackingScreen = () => {
                     ref={mapRef}
                     provider={PROVIDER_DEFAULT}
                     style={{ width: '100%', height: MAP_HEIGHT_EXPANDED }}
+                    pointerEvents={showMap ? 'auto' : 'none'}
                     initialRegion={{
                         latitude: 26.4499,
                         longitude: 80.3319,
@@ -607,7 +649,11 @@ export const OrderTrackingScreen = () => {
 
                 {/* ETA/Status Card Overlay - Only when map is shown and active */}
                 {isActiveOrder && routeData && (
-                    <View style={styles.etaCard}>
+                    <Animated.View style={[
+                        styles.etaCard,
+                        { top: insets.top + HEADER_CONTENT_HEIGHT + 12, zIndex: 102 },
+                        animatedEtaCardStyle
+                    ]}>
                         <TouchableOpacity
                             style={styles.closeMapBtn}
                             onPress={() => setShowMap(false)}
@@ -639,12 +685,16 @@ export const OrderTrackingScreen = () => {
                                 return <MonoText size="xs" color={colors.textLight}>Assigning partner...</MonoText>;
                             }
                         })()}
-                    </View>
+                    </Animated.View>
                 )}
             </Animated.View>
 
-            {!showMap && isActiveOrder && routeData && (
-                <View style={[styles.inlineTrackingCard, { marginTop: insets.top + HEADER_CONTENT_HEIGHT + 10 }]}>
+            {!isPastOrder && isActiveOrder && routeData && (
+                <Animated.View style={[
+                    styles.inlineTrackingCard,
+                    { top: insets.top + HEADER_CONTENT_HEIGHT + 12, zIndex: 101 },
+                    animatedInlineCardStyle
+                ]}>
                     <View style={styles.inlineTrackingInfo}>
                         <View>
                             <MonoText size="xs" color={colors.textLight}>Estimated Delivery</MonoText>
@@ -653,7 +703,13 @@ export const OrderTrackingScreen = () => {
                         {status !== 'delivered' && (
                             <TouchableOpacity
                                 style={styles.showMapButton}
-                                onPress={() => setShowMap(true)}
+                                onPress={() => {
+                                    setShowMap(true);
+                                    // Sync location state immediately when opening
+                                    if (lastPartnerLocRef.current) {
+                                        setPartnerLocation(lastPartnerLocRef.current);
+                                    }
+                                }}
                             >
                                 <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2" style={{ marginRight: 6 }}>
                                     <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
@@ -669,7 +725,7 @@ export const OrderTrackingScreen = () => {
                             <MonoText size="xs" color={colors.success} weight="bold">Live Tracking Active</MonoText>
                         </View>
                     )}
-                </View>
+                </Animated.View>
             )}
 
             {/* Bottom Sheet Content */}
@@ -677,19 +733,22 @@ export const OrderTrackingScreen = () => {
                 style={[
                     styles.bottomSheet,
                     showMap
-                        ? { marginTop: -20 } // When map is expanded, overlap slightly
-                        : isPastOrder
-                            ? { marginTop: insets.top + HEADER_CONTENT_HEIGHT + 10 } // Past orders: account for header
-                            : { marginTop: isActiveOrder && routeData ? 0 : insets.top + HEADER_CONTENT_HEIGHT + 10 } // Active without map but with inline card handled separately
+                        ? { marginTop: -24, zIndex: 10 }
+                        : {
+                            marginTop: isPastOrder || (!isActiveOrder || !routeData)
+                                ? insets.top + HEADER_CONTENT_HEIGHT + 12
+                                : insets.top + HEADER_CONTENT_HEIGHT + 98, // T: 12 + CardHeight: ~110 + B: 12
+                            zIndex: 10
+                        }
                 ]}
-                contentContainerStyle={{ paddingBottom: 100, paddingTop: 20 }}
+                contentContainerStyle={{ paddingBottom: 100, paddingTop: 16 }}
                 showsVerticalScrollIndicator={false}
                 bounces={true}
                 scrollEventThrottle={16}
             >
 
 
-                <View style={[styles.handle, { alignSelf: 'center' }]} />
+
 
                 {/* Glassmorphism Tab Selector */}
                 <View style={styles.glassTabContainer}>
@@ -1317,9 +1376,8 @@ const styles = StyleSheet.create({
     },
     etaCard: {
         position: 'absolute',
-        top: Platform.OS === 'android' ? 110 : 130,
-        right: 16,
         left: 16,
+        right: 16,
         backgroundColor: 'white',
         padding: 16,
         borderRadius: 16,
@@ -1343,21 +1401,22 @@ const styles = StyleSheet.create({
         padding: 4,
     },
     inlineTrackingCard: {
+        position: 'absolute', // Fixed position for stationary cross-fade
+        left: 16,
+        right: 16,
         backgroundColor: colors.white,
-        marginHorizontal: 16,
         padding: 16,
         borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#F1F5F9',
+        zIndex: 101,
         ...Platform.select({
             ios: {
                 shadowColor: '#000',
-                shadowOpacity: 0.05,
-                shadowRadius: 10,
+                shadowOpacity: 0.08,
+                shadowRadius: 12,
                 shadowOffset: { width: 0, height: 4 },
             },
             android: {
-                elevation: 3,
+                elevation: 4,
             },
         }),
     },
@@ -1427,10 +1486,8 @@ const styles = StyleSheet.create({
     bottomSheet: {
         flex: 1,
         backgroundColor: 'white',
-        borderTopLeftRadius: 0,
-        borderTopRightRadius: 0,
         paddingHorizontal: spacing.l,
-        marginTop: -20, // Overlap map slightly
+        zIndex: 10,
         ...Platform.select({
             ios: {
                 shadowColor: '#000',

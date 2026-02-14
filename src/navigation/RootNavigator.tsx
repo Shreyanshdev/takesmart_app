@@ -8,6 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { TabNavigator } from './TabNavigator';
 import { PartnerTabNavigator } from './PartnerTabNavigator';
 import { CustomerLoginScreen } from '../screens/auth/CustomerLoginScreen';
+import { OTPScreen } from '../screens/auth/OTPScreen';
 import { PartnerLoginScreen } from '../screens/auth/PartnerLoginScreen';
 import { OnboardingScreen } from '../screens/auth/OnboardingScreen';
 import { CompleteProfileScreen } from '../screens/auth/CompleteProfileScreen';
@@ -19,10 +20,10 @@ import { PartnerOrderTrackingScreen } from '../screens/partner/PartnerOrderTrack
 import { useAuthStore } from '../store/authStore';
 import { useBranchStore } from '../store/branch.store';
 import { CategoriesScreen } from '../screens/customer/Product/CategoriesScreen';
+import { SubcategoriesScreen } from '../screens/customer/Product/SubcategoriesScreen';
 import { SearchScreen } from '../screens/customer/Product/SearchScreen';
 import { ProfileScreen } from '../screens/customer/Profile/ProfileScreen';
 import { EditProfileScreen } from '../screens/customer/Profile/EditProfileScreen';
-import { AnimalHealthScreen } from '../screens/customer/Animal/AnimalHealthScreen';
 import { OrderHistoryScreen } from '../screens/customer/Orders/OrderHistoryScreen';
 import { PrivacyPolicyScreen } from '../screens/customer/Settings/PrivacyPolicyScreen';
 import { FeedbackScreen } from '../screens/customer/Profile/FeedbackScreen';
@@ -96,7 +97,7 @@ export const RootNavigator = () => {
                 screenOptions={{
                     headerShown: false,
                     animation: 'slide_from_right',
-                    contentStyle: { backgroundColor: colors.white }
+                    contentStyle: { backgroundColor: colors.white },
                 }}
             >
                 {isAuthenticated ? (
@@ -119,11 +120,11 @@ export const RootNavigator = () => {
                             <Stack.Screen name="Checkout" component={CheckoutScreen} />
                             <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
                             <Stack.Screen name="Categories" component={CategoriesScreen} />
+                            <Stack.Screen name="Subcategories" component={SubcategoriesScreen} />
                             <Stack.Screen name="Search" component={SearchScreen} />
                             <Stack.Screen name="Profile" component={ProfileScreen} />
                             <Stack.Screen name="EditProfile" component={EditProfileScreen} />
                             <Stack.Screen name="OrderHistory" component={OrderHistoryScreen} />
-                            <Stack.Screen name="AnimalHealth" component={AnimalHealthScreen} />
                             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
                             <Stack.Screen name="Terms" component={TermsScreen} />
                             <Stack.Screen name="Feedback" component={FeedbackScreen} />
@@ -136,6 +137,7 @@ export const RootNavigator = () => {
                     <>
                         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
                         <Stack.Screen name="CustomerLogin" component={CustomerLoginScreen} />
+                        <Stack.Screen name="OTPScreen" component={OTPScreen} />
                         <Stack.Screen name="PartnerLogin" component={PartnerLoginScreen} />
                     </>
                 )}

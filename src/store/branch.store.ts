@@ -4,6 +4,7 @@ import GetLocation from 'react-native-get-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Branch, branchService } from '../services/customer/branch.service';
 import { logger } from '../utils/logger';
+import { promptForEnableLocationIfNeeded } from 'react-native-android-location-enabler';
 
 const LOCATION_CACHE_KEY = 'techsmart_branch_cache';
 
@@ -137,6 +138,26 @@ export const useBranchStore = create<BranchState>((set, get) => ({
 
             set({ locationStatus: 'granted' });
 
+            // On Android, prompt user to enable GPS if it's disabled (native dialog)
+            if (Platform.OS === 'android') {
+                try {
+                    await promptForEnableLocationIfNeeded();
+                } catch (enableError: any) {
+                    logger.warn('[BranchStore] User declined to enable GPS:', enableError.message);
+                    set({ isLoading: false, locationStatus: 'disabled' });
+                    // Fallback: offer to open settings manually
+                    Alert.alert(
+                        'GPS Required',
+                        'Please enable GPS/Location Services to continue.',
+                        [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                        ]
+                    );
+                    return null;
+                }
+            }
+
             // Get current position
             const location = await GetLocation.getCurrentPosition({
                 enableHighAccuracy: true,
@@ -170,6 +191,16 @@ export const useBranchStore = create<BranchState>((set, get) => ({
             const errorCode = error.code;
             if (errorCode === 'CANCELLED' || errorCode === 'UNAVAILABLE') {
                 set({ locationStatus: 'disabled' });
+                // GPS is disabled - this case should be rare since we prompt earlier
+                // but show fallback alert just in case
+                Alert.alert(
+                    'Location Unavailable',
+                    'Could not get your location. Please check your GPS settings.',
+                    [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                    ]
+                );
             } else if (errorCode === 'TIMEOUT') {
                 set({ locationStatus: 'unavailable' });
             }
@@ -201,7 +232,7 @@ export const useBranchStore = create<BranchState>((set, get) => ({
                 currentBranch: branch,
                 isLoading: false,
                 isManualLocation: true,
-                isServiceAvailable: true,
+                isServiceAvailable: branch.isWithinRadius !== false,
                 error: null
             });
 

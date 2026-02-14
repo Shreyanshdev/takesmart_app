@@ -2,21 +2,23 @@ import React, { useState } from 'react';
 import {
     View,
     StyleSheet,
-    Modal,
     TouchableOpacity,
     TextInput,
     ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
-    Image
+    Image,
+    Dimensions
 } from 'react-native';
+import Modal from 'react-native-modal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme/colors';
-import { spacing } from '../../theme/spacing';
-import { MonoText } from '../shared/MonoText';
+import { MonoText } from './MonoText';
 import Svg, { Path, Line } from 'react-native-svg';
 import { reviewService } from '../../services/customer/review.service';
 import { logger } from '../../utils/logger';
+
+const { height } = Dimensions.get('window');
 
 interface RatingModalProps {
     visible: boolean;
@@ -132,28 +134,31 @@ export const RatingModal: React.FC<RatingModalProps> = ({
 
     return (
         <Modal
-            visible={visible}
-            transparent
-            animationType="slide"
-            onRequestClose={onClose}
+            isVisible={visible}
+            onBackdropPress={onClose}
+            onBackButtonPress={onClose}
+            onSwipeComplete={onClose}
+            swipeDirection={['down']}
+            backdropOpacity={0.4}
+            style={styles.modal}
             statusBarTranslucent
+            deviceHeight={height}
+            propagateSwipe={true}
+            avoidKeyboard={true}
+            animationIn="slideInUp"
+            animationOut="slideOutDown"
+            useNativeDriverForBackdrop
         >
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.overlay}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                style={styles.keyboardView}
             >
-                <TouchableOpacity
-                    style={styles.backdrop}
-                    activeOpacity={1}
-                    onPress={onClose}
-                />
-
-                <View style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}>
-                    {/* Header */}
+                <View style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 20) + 20 }]}>
+                    {/* Header Handles */}
                     <View style={styles.header}>
                         <View style={styles.pill} />
                         <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-                            <Svg width="22" height="22" viewBox="0 0 24 24" stroke={colors.black} strokeWidth="2.5">
+                            <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2.5">
                                 <Line x1="18" y1="6" x2="6" y2="18" />
                                 <Line x1="6" y1="6" x2="18" y2="18" />
                             </Svg>
@@ -169,9 +174,11 @@ export const RatingModal: React.FC<RatingModalProps> = ({
                                 resizeMode="contain"
                             />
                         )}
-                        <MonoText size="m" weight="bold" style={styles.productName} numberOfLines={2}>
-                            {productName}
-                        </MonoText>
+                        <View style={{ flex: 1 }}>
+                            <MonoText size="m" weight="bold" style={styles.productName} numberOfLines={2}>
+                                {productName}
+                            </MonoText>
+                        </View>
                     </View>
 
                     {/* Title */}
@@ -246,19 +253,19 @@ export const RatingModal: React.FC<RatingModalProps> = ({
 };
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
+    modal: {
+        margin: 0,
         justifyContent: 'flex-end',
     },
-    backdrop: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.4)',
+    keyboardView: {
+        width: '100%',
     },
     modalContent: {
         backgroundColor: colors.white,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         paddingHorizontal: 24,
+        paddingTop: 8,
     },
     header: {
         alignItems: 'center',
@@ -267,14 +274,14 @@ const styles = StyleSheet.create({
     },
     pill: {
         width: 40,
-        height: 4,
+        height: 5,
         backgroundColor: colors.border,
-        borderRadius: 2,
+        borderRadius: 2.5,
     },
     closeButton: {
         position: 'absolute',
         right: 0,
-        top: 8,
+        top: 4,
         padding: 8,
         backgroundColor: colors.background,
         borderRadius: 20,
@@ -286,18 +293,19 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     productImage: {
-        width: 60,
-        height: 60,
-        borderRadius: 8,
-        backgroundColor: colors.background,
-        marginRight: 12,
+        width: 64,
+        height: 64,
+        borderRadius: 12,
+        backgroundColor: '#F8FAFC',
+        marginRight: 16,
+        padding: 4,
     },
     productName: {
         flex: 1,
     },
     title: {
         textAlign: 'center',
-        marginBottom: 16,
+        marginVertical: 12,
     },
     starsContainer: {
         flexDirection: 'row',
@@ -305,30 +313,34 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     starButton: {
-        padding: 4,
+        padding: 6,
     },
     ratingLabel: {
         textAlign: 'center',
-        marginBottom: 20,
+        marginBottom: 24,
     },
     titleInput: {
-        backgroundColor: colors.background,
-        borderRadius: 10,
+        backgroundColor: '#F8FAFC',
+        borderRadius: 12,
         paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingVertical: 14,
         fontSize: 14,
         fontFamily: 'Inter-Medium',
         marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#F1F5F9',
     },
     commentInput: {
-        backgroundColor: colors.background,
-        borderRadius: 10,
+        backgroundColor: '#F8FAFC',
+        borderRadius: 12,
         paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingVertical: 14,
         fontSize: 14,
         fontFamily: 'Inter-Regular',
-        minHeight: 100,
+        minHeight: 120,
         marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#F1F5F9',
     },
     error: {
         textAlign: 'center',
@@ -337,9 +349,20 @@ const styles = StyleSheet.create({
     submitButton: {
         backgroundColor: colors.primary,
         paddingVertical: 16,
-        borderRadius: 12,
+        borderRadius: 16,
         alignItems: 'center',
         marginTop: 8,
+        ...Platform.select({
+            ios: {
+                shadowColor: colors.primary,
+                shadowOpacity: 0.2,
+                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 4 },
+            },
+            android: {
+                elevation: 4,
+            },
+        }),
     },
     submitButtonDisabled: {
         opacity: 0.6,

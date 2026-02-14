@@ -10,25 +10,25 @@ export const TrackingSkeleton = () => {
     return (
         <View style={styles.container}>
             {/* Header Skeleton */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: 20 }]}>
                 <SkeletonItem width={40} height={40} borderRadius={20} />
-                <SkeletonItem width="40%" height={20} borderRadius={4} style={{ marginLeft: 16 }} />
+                <SkeletonItem width="40%" height={24} borderRadius={4} style={{ marginLeft: 16 }} />
             </View>
 
             {/* Collapsed Map Area Placeholder (Matches inlineTrackingCard) */}
             <View style={styles.collapsedMapPlaceholder}>
-                <SkeletonItem width="100%" height={80} borderRadius={16} />
+                <SkeletonItem width="100%" height={84} borderRadius={16} />
             </View>
 
             {/* Bottom Content Skeleton */}
             <View style={styles.bottomContent}>
 
-                <View style={styles.handle} />
+
 
                 {/* Tab Selector Skeleton */}
                 <View style={styles.tabSelector}>
-                    <SkeletonItem width="48%" height={40} borderRadius={10} />
-                    <SkeletonItem width="48%" height={40} borderRadius={10} />
+                    <SkeletonItem width="48%" height={44} borderRadius={12} />
+                    <SkeletonItem width="48%" height={44} borderRadius={12} />
                 </View>
 
                 {/* Summary Card Skeleton */}
@@ -65,23 +65,20 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'ios' ? 60 : 20,
-        height: Platform.OS === 'ios' ? 110 : 70,
+        height: 56 + 44, // HEADER_CONTENT_HEIGHT + typical inset
         borderBottomWidth: 1,
-        borderBottomColor: '#F1F5F9',
+        borderBottomColor: '#F8FAFC',
     },
     collapsedMapPlaceholder: {
-        paddingHorizontal: spacing.l,
-        marginTop: Platform.OS === 'ios' ? 20 : 10,
-        marginBottom: 10,
+        paddingHorizontal: 16,
+        marginTop: 4,
+        marginBottom: 4,
     },
     bottomContent: {
         flex: 1,
         paddingHorizontal: spacing.l,
-        paddingTop: 10,
+        paddingTop: 8,
         backgroundColor: colors.white,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
     },
     handle: {
         width: 40,
@@ -94,10 +91,12 @@ const styles = StyleSheet.create({
     tabSelector: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        backgroundColor: '#F8FAFC',
+        backgroundColor: 'rgba(248, 250, 252, 0.5)',
         padding: 4,
-        borderRadius: 12,
+        borderRadius: 16,
         marginBottom: 24,
+        height: 52,
+        alignItems: 'center',
     },
     summaryCard: {
         padding: 24,

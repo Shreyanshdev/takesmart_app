@@ -10,6 +10,7 @@ import {
     Animated,
     Dimensions
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { BlurView } from '@react-native-community/blur';
@@ -144,13 +145,13 @@ export const SearchScreen = () => {
         inputRef.current?.focus();
     };
 
-    const handleProductPress = (product: Product, variantId?: string) => {
+    const handleProductPress = React.useCallback((product: Product, variantId?: string) => {
         setSelectedProduct(product);
         setSelectedVariantId(variantId || null);
         setDetailsModalVisible(true);
-    };
+    }, []);
 
-    const handleAddToCart = (product: Product, variant: any) => {
+    const handleAddToCart = React.useCallback((product: Product, variant: any) => {
         const cartItemId = variant?._id || variant?.inventoryId || product._id;
         const productImage = variant?.variant?.images?.[0] || product.images?.[0] || product.image;
 
@@ -159,6 +160,7 @@ export const SearchScreen = () => {
             _id: cartItemId,
             name: product.name,
             image: productImage || '',
+            images: productImage ? [productImage] : (product.images || []),
             price: variant?.pricing?.mrp || 0,
             discountPrice: variant?.pricing?.sellingPrice || 0,
             stock: variant?.stock || 0,
@@ -168,7 +170,7 @@ export const SearchScreen = () => {
             } : undefined,
             formattedQuantity: variant?.variant ? `${variant.variant.weightValue} ${variant.variant.weightUnit}` : undefined
         } as any);
-        
+
         if (!success) {
             const currentQuantity = getItemQuantity(cartItemId);
             if (currentQuantity >= (variant?.stock || 0)) {
@@ -177,33 +179,38 @@ export const SearchScreen = () => {
                 showToast('Product is out of stock!');
             }
         }
-    };
+    }, [addToCart, getItemQuantity, showToast]);
 
-    const renderProductItem = ({ item }: { item: any }) => {
-        const product = item.product || item;
-        const variant = item.variant || product.variants?.[0];
-        const cartItemId = variant?._id || variant?.inventoryId || product._id;
+    const renderProductItem = React.useCallback(({ item }: { item: any }) => {
+        // Products are now flattened with embedded variant data
+        // Use inventoryId for cart lookup (each variant has unique inventoryId)
+        const cartItemId = item.inventoryId || item._id;
+        const variantData = {
+            _id: item.inventoryId,
+            inventoryId: item.inventoryId,
+            variant: item.variant,
+            pricing: item.pricing,
+            stock: item.stock,
+            isAvailable: item.isAvailable
+        };
         const quantity = getItemQuantity(cartItemId);
 
         return (
             <ProductGridCard
-                product={product}
-                variant={variant}
+                product={item}
+                variant={variantData}
                 quantity={quantity}
                 width={CARD_WIDTH}
                 onPress={handleProductPress}
                 onAddToCart={handleAddToCart}
                 onRemoveFromCart={removeFromCart}
-                isSoldOut={!variant?.isAvailable}
+                isSoldOut={!item.isAvailable}
             />
         );
-    };
+    }, [getItemQuantity, handleProductPress, handleAddToCart, removeFromCart]);
 
-    // Animated width for search input
-    const animatedSearchWidth = searchBarWidth.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0%', '100%']
-    });
+    // 0. Typed FlashList alias for TS
+    const FlashListOptimized = FlashList as any;
 
     // 1. Initial State -> Trending Grid
     const renderInitialState = () => (
@@ -222,17 +229,13 @@ export const SearchScreen = () => {
                     ))}
                 </View>
             ) : (
-                <FlatList
-                    data={trendingProducts.flatMap(p => {
-                        const variants = (p as any).variants || [];
-                        if (variants.length <= 1) return [p];
-                        return variants.map((v: any) => ({ product: p, variant: v }));
-                    })}
+                <FlashListOptimized
+                    data={trendingProducts}
                     renderItem={renderProductItem}
-                    keyExtractor={(item, index) => (item.product?._id || item._id) + (item.variant?.inventoryId || index)}
+                    keyExtractor={(item: any, index: number) => `${item._id}_${item.inventoryId || index}`}
                     numColumns={2}
+                    estimatedItemSize={280}
                     scrollEnabled={false}
-                    columnWrapperStyle={{ gap: 16 }}
                 />
             )}
         </View>
@@ -282,17 +285,13 @@ export const SearchScreen = () => {
                     <MonoText size="s" color={colors.textLight} style={{ marginTop: 4 }}>Try a different search term</MonoText>
                 </View>
             ) : (
-                <FlatList
-                    data={filteredProducts.flatMap(p => {
-                        const variants = (p as any).variants || [];
-                        if (variants.length <= 1) return [p];
-                        return variants.map((v: any) => ({ product: p, variant: v }));
-                    })}
+                <FlashListOptimized
+                    data={filteredProducts}
                     renderItem={renderProductItem}
-                    keyExtractor={(item, index) => (item.product?._id || item._id) + (item.variant?.inventoryId || index)}
+                    keyExtractor={(item: any, index: number) => `${item._id}_${item.inventoryId || index}`}
                     numColumns={2}
+                    estimatedItemSize={280}
                     scrollEnabled={false}
-                    columnWrapperStyle={{ gap: 16 }}
                 />
             )}
         </View>

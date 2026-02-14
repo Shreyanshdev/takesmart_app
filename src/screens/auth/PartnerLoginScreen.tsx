@@ -4,11 +4,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { BlurView } from '@react-native-community/blur';
 import LinearGradient from 'react-native-linear-gradient';
-import Svg, { Path, Circle, Rect } from 'react-native-svg';
+import Svg, { Path, Circle, Rect, Line } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../../components/shared/MonoText';
-import { PasswordBottomSheet } from '../../components/auth/PasswordBottomSheet';
 import { authService } from '../../services/auth/auth.service';
 import { useAuthStore } from '../../store/authStore';
 
@@ -18,16 +17,15 @@ export const PartnerLoginScreen = () => {
     const navigation = useNavigation<any>();
     const { login } = useAuthStore();
     const [email, setEmail] = useState('');
-    const [passwordVisible, setPasswordVisible] = useState(false);
+    const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
 
     const isEmailValid = email.includes('@') && email.includes('.');
 
-    const handleNext = () => {
-        setPasswordVisible(true);
-    };
+    const handleLogin = async () => {
+        if (!isEmailValid || !password) return;
 
-    const handleLogin = async (password: string) => {
         setLoading(true);
         try {
             const response = await authService.loginPartner(email, password);
@@ -38,9 +36,7 @@ export const PartnerLoginScreen = () => {
             }
 
             login(user);
-
             setLoading(false);
-            setPasswordVisible(false);
         } catch (error: any) {
             setLoading(false);
             Alert.alert('Login Failed', error.response?.data?.message || error.message || 'Invalid email or password');
@@ -138,12 +134,43 @@ export const PartnerLoginScreen = () => {
                                     )}
                                 </View>
 
-                                {/* Next Button (Liquid) */}
-                                {/* Continue Button - Glass Style */}
+                                <MonoText size="xs" weight="bold" color={colors.textLight} style={[styles.inputLabel, { marginTop: spacing.l }]}>
+                                    PASSWORD
+                                </MonoText>
+                                <View style={styles.emailInputWrapper}>
+                                    <View style={styles.emailIcon}>
+                                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <Rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                            <Path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                        </Svg>
+                                    </View>
+                                    <TextInput
+                                        style={styles.emailInput}
+                                        value={password}
+                                        onChangeText={setPassword}
+                                        placeholder="••••••••"
+                                        placeholderTextColor="#D1D5DB"
+                                        secureTextEntry={!showPassword}
+                                        autoCapitalize="none"
+                                    />
+                                    <TouchableOpacity
+                                        onPress={() => setShowPassword(!showPassword)}
+                                        style={styles.eyeIcon}
+                                    >
+                                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <Path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                            <Circle cx="12" cy="12" r="3" />
+                                            {!showPassword && <Path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />}
+                                            {!showPassword && <Line x1="1" y1="1" x2="23" y2="23" />}
+                                        </Svg>
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* Login Button - Glass Style */}
                                 <TouchableOpacity
                                     style={styles.continueBtn}
-                                    onPress={handleNext}
-                                    disabled={!isEmailValid || loading}
+                                    onPress={handleLogin}
+                                    disabled={!isEmailValid || !password || loading}
                                     activeOpacity={0.8}
                                 >
                                     <BlurView
@@ -157,7 +184,7 @@ export const PartnerLoginScreen = () => {
                                         style={styles.buttonGradient}
                                     >
                                         <MonoText weight="bold" color={colors.primary} size="m">
-                                            {loading ? 'Verifying...' : 'Continue'}
+                                            {loading ? 'Logging in...' : 'Login Now'}
                                         </MonoText>
                                         {!loading && (
                                             <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ marginLeft: 8 }}>
@@ -195,14 +222,7 @@ export const PartnerLoginScreen = () => {
                     </TouchableOpacity>
                 </View>
             </View>
-
-            <PasswordBottomSheet
-                visible={passwordVisible}
-                onClose={() => setPasswordVisible(false)}
-                onLogin={handleLogin}
-                loading={loading}
-            />
-        </View >
+        </View>
     );
 };
 
@@ -349,6 +369,9 @@ const styles = StyleSheet.create({
     },
     validIcon: {
         marginLeft: spacing.s,
+    },
+    eyeIcon: {
+        padding: spacing.s,
     },
     // Liquid Button
     continueBtn: {

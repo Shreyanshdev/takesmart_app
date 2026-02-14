@@ -10,6 +10,7 @@ import {
     ActivityIndicator,
     Platform
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { BlurView } from '@react-native-community/blur';
@@ -41,9 +42,11 @@ export const BrowseProductsScreen = () => {
     const { type, value, categoryId } = route.params;
     const insets = useSafeAreaInsets();
 
+    // Products state with cursor pagination
     const [products, setProducts] = useState<Product[]>([]);
     const [loading, setLoading] = useState(true);
-    const [page, setPage] = useState(1);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [nextCursor, setNextCursor] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(true);
 
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -55,45 +58,31 @@ export const BrowseProductsScreen = () => {
     const branchId = currentBranch?._id;
 
     useEffect(() => {
-        fetchProducts();
+        if (branchId) {
+            fetchProducts();
+        }
     }, [type, value, branchId]); // Refresh if branch changes
 
-    const fetchProducts = async (pageNum = 1) => {
-        setLoading(pageNum === 1);
+    const fetchProducts = async () => {
+        if (!branchId) return;
+
+        setLoading(true);
+        setProducts([]);
+        setNextCursor(null);
+        setHasMore(true);
+
         try {
-            let newProducts: Product[] = [];
-            let pagination: any = null;
-
-            if (type === 'brand') {
-                const response = await productService.getProductsByBrand(value, branchId, pageNum, 20);
-                newProducts = response.products || [];
-                pagination = response.pagination;
-            } else {
-                const response = await productService.getProductsByCategory(categoryId || value, branchId);
-                newProducts = Array.isArray(response) ? response : [];
-            }
-
-            // Flatten products with variants for the grid
-            const flattened: any[] = [];
-
-            newProducts.forEach(product => {
-                const variants = (product as any).variants || [];
-                if (variants.length > 0) {
-                    variants.forEach((variant: any) => {
-                        // Only show if variant is available in this branch context
-                        if (variant.isAvailable) {
-                            flattened.push({ ...product, _displayVariant: variant });
-                        }
-                    });
-                }
+            // Use optimized feed API for both category and brand browsing
+            const feedData = await productService.getProductsFeed(branchId, {
+                limit: 20,
+                category: type === 'category' ? (categoryId || value) : undefined,
+                brand: type === 'brand' ? value : undefined
             });
 
-            if (pageNum === 1) {
-                setProducts(flattened);
-            } else {
-                setProducts(prev => [...prev, ...flattened]);
-            }
-            setHasMore(pagination ? pagination.hasNext : false);
+            // Products are now pre-flattened from API
+            setProducts(feedData.products || []);
+            setNextCursor(feedData.nextCursor);
+            setHasMore(feedData.hasMore);
         } catch (err) {
             console.error('Failed to fetch products:', err);
         } finally {
@@ -101,20 +90,48 @@ export const BrowseProductsScreen = () => {
         }
     };
 
-    const loadMore = () => {
-        if (!loading && hasMore) {
-            setPage(p => p + 1);
-            fetchProducts(page + 1);
+    const loadMore = async () => {
+        if (isLoadingMore || !hasMore || !branchId || !nextCursor) return;
+
+        setIsLoadingMore(true);
+        try {
+            const feedData = await productService.getProductsFeed(branchId, {
+                limit: 20,
+                cursor: nextCursor,
+                category: type === 'category' ? (categoryId || value) : undefined,
+                brand: type === 'brand' ? value : undefined
+            });
+
+            // Products are pre-flattened from API - append with deduplication safeguard
+            setProducts(prev => {
+                const existingIds = new Set(prev.map(p => p.inventoryId || p._id));
+                const seenInBatch = new Set<string>();
+
+                const newProducts = (feedData.products || []).filter(p => {
+                    const id = p.inventoryId || p._id;
+                    if (id && (existingIds.has(id) || seenInBatch.has(id))) return false;
+                    if (id) seenInBatch.add(id);
+                    return true;
+                });
+                return [...prev, ...newProducts];
+            });
+            setNextCursor(feedData.nextCursor);
+            setHasMore(feedData.hasMore);
+        } catch (err) {
+            console.error('Failed to load more products:', err);
+        } finally {
+            setIsLoadingMore(false);
         }
     };
 
-    const handleProductPress = (product: Product, variantId?: string) => {
+
+    const handleProductPress = React.useCallback((product: Product, variantId?: string) => {
         setSelectedProduct(product);
         setSelectedVariantId(variantId);
         setModalVisible(true);
-    };
+    }, []);
 
-    const handleAddToCart = (product: Product, variant: any) => {
+    const handleAddToCart = React.useCallback((product: Product, variant: any) => {
         const cartItemId = variant?._id || variant?.inventoryId || product._id;
         const productImage = variant?.variant?.images?.[0] || product.images?.[0] || product.image;
 
@@ -123,6 +140,7 @@ export const BrowseProductsScreen = () => {
             _id: cartItemId,
             name: product.name,
             image: productImage || '',
+            images: productImage ? [productImage] : (product.images || []),
             price: variant?.pricing?.mrp || 0,
             discountPrice: variant?.pricing?.sellingPrice || 0,
             stock: variant?.stock || 0,
@@ -132,7 +150,7 @@ export const BrowseProductsScreen = () => {
             } : undefined,
             formattedQuantity: variant?.variant ? `${variant.variant.weightValue} ${variant.variant.weightUnit}` : undefined
         } as any);
-        
+
         if (!success) {
             const { useToastStore } = require('../../store/toast.store');
             const currentQuantity = getItemQuantity(cartItemId);
@@ -142,31 +160,45 @@ export const BrowseProductsScreen = () => {
                 useToastStore.getState().showToast('Product is out of stock!');
             }
         }
-    };
+    }, [addToCart, getItemQuantity]);
 
-    const handleRemoveFromCart = (cartItemId: string) => {
+    const handleRemoveFromCart = React.useCallback((cartItemId: string) => {
         removeFromCart(cartItemId);
-    };
+    }, [removeFromCart]);
 
-    const renderProductCard = ({ item }: { item: any }) => {
-        const variant = item._displayVariant;
+    const renderProductCard = React.useCallback(({ item }: { item: Product }) => {
+        // Products now have embedded variant/pricing/stock data from API
+        const variantData = {
+            _id: item.inventoryId,
+            inventoryId: item.inventoryId,
+            variant: item.variant,
+            pricing: item.pricing,
+            stock: item.stock,
+            isAvailable: item.isAvailable
+        };
+        // Use inventoryId for cart lookup (each variant has unique inventoryId)
+        const cartItemId = item.inventoryId || item._id;
 
         return (
-            <ProductGridCard
-                product={item}
-                variant={variant}
-                quantity={getItemQuantity(variant?._id || variant?.inventoryId || item._id)}
-                width={CARD_WIDTH}
-                onPress={handleProductPress}
-                onAddToCart={handleAddToCart}
-                onRemoveFromCart={handleRemoveFromCart}
-            />
+            <View style={{ marginHorizontal: 6 }}>
+                <ProductGridCard
+                    product={item}
+                    variant={variantData}
+                    quantity={getItemQuantity(cartItemId)}
+                    width={CARD_WIDTH}
+                    onPress={handleProductPress}
+                    onAddToCart={handleAddToCart}
+                    onRemoveFromCart={handleRemoveFromCart}
+                />
+            </View>
         );
-    };
+    }, [items, getItemQuantity, handleProductPress, handleAddToCart, handleRemoveFromCart]);
 
     // Calculate total items from items array
     const totalItemsCount = items.reduce((sum, item) => sum + item.quantity, 0);
     const cartTotal = getTotalPrice();
+
+    const FlashListOptimized = FlashList as any;
 
     return (
         <View style={styles.container}>
@@ -222,27 +254,46 @@ export const BrowseProductsScreen = () => {
                     </MonoText>
                 </View>
             ) : (
-                <FlatList
-                    data={products as any[]}
-                    keyExtractor={(item, index) => `${item._id}_${item._displayVariant?._id || index}`}
-                    numColumns={2}
-                    contentContainerStyle={[
-                        styles.listContent,
-                        { paddingBottom: totalItemsCount > 0 ? 120 : 40 }
-                    ]}
-                    columnWrapperStyle={styles.columnWrapper}
-                    renderItem={renderProductCard}
-                    onEndReached={loadMore}
-                    onEndReachedThreshold={0.5}
-                    showsVerticalScrollIndicator={false}
-                    ListEmptyComponent={() => (
-                        <View style={styles.emptyContainer}>
-                            <MonoText color={colors.textLight}>No products available in this store.</MonoText>
-                        </View>
-                    )}
-                    ListFooterComponent={<BrandFooter />}
-                />
+                <View style={{ flex: 1, paddingHorizontal: 6 }}>
+                    <FlashListOptimized
+                        data={products}
+                        keyExtractor={(item: Product, index: number) => `${item._id}_${item.inventoryId || index}`}
+                        numColumns={2}
+                        contentContainerStyle={[
+                            styles.listContent,
+                            {
+                                paddingBottom: totalItemsCount > 0 ? 120 : 40,
+                                // paddingTop: insets.top + 60 + 12 // Moved to ListHeaderComponent
+                            }
+                        ]}
+                        renderItem={renderProductCard}
+                        onEndReached={loadMore}
+                        onEndReachedThreshold={0.5}
+                        showsVerticalScrollIndicator={false}
+                        estimatedItemSize={280}
+                        ListHeaderComponent={() => (
+                            <View style={{ height: insets.top + 60 + 12 }} />
+                        )}
+                        ListEmptyComponent={() => (
+                            <View style={styles.emptyContainer}>
+                                <MonoText color={colors.textLight}>No products available in this store.</MonoText>
+                            </View>
+                        )}
+                        ListFooterComponent={
+                            <>
+                                {isLoadingMore && (
+                                    <View style={styles.loadingMore}>
+                                        <ActivityIndicator size="small" color={colors.primary} />
+                                        <MonoText size="s" color={colors.textLight} style={{ marginLeft: 8 }}>Loading more...</MonoText>
+                                    </View>
+                                )}
+                                <BrandFooter />
+                            </>
+                        }
+                    />
+                </View>
             )}
+
 
             {/* Cart Bar */}
             {totalItemsCount > 0 && (
@@ -316,8 +367,8 @@ const styles = StyleSheet.create({
         paddingTop: 150,
     },
     listContent: {
-        paddingTop: 120,
-        paddingHorizontal: 12,
+        // paddingTop: 120, // Removed fixed padding, now dynamic
+        // paddingHorizontal: 6, // Moved to parent container
     },
     columnWrapper: {
         justifyContent: 'space-between',
@@ -459,6 +510,13 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         lineHeight: 22,
         paddingHorizontal: 20,
+    },
+    loadingMore: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: spacing.l,
+        marginTop: spacing.m,
     },
 });
 

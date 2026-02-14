@@ -1,19 +1,71 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, FlatList, Platform } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, FlatList, Platform, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import Svg, { Path, Circle, Polyline } from 'react-native-svg';
+import Svg, { Path, Polyline } from 'react-native-svg';
 import { colors } from '../../../theme/colors';
-import { spacing } from '../../../theme/spacing';
 import { MonoText } from '../../../components/shared/MonoText';
 import { api } from '../../../services/core/api';
 import { useAuthStore } from '../../../store/authStore';
-import LinearGradient from 'react-native-linear-gradient';
 import { logger } from '../../../utils/logger';
 import { BlurView } from '@react-native-community/blur';
 import { SkeletonItem } from '../../../components/shared/SkeletonLoader';
 
 const HEADER_CONTENT_HEIGHT = 56;
+
+// Pulsing Orb Component for "Pending" status
+const PulsingOrb = ({ color }: { color: string }) => {
+    const scale = useRef(new Animated.Value(1)).current;
+    const opacity = useRef(new Animated.Value(0.5)).current;
+
+    useEffect(() => {
+        Animated.loop(
+            Animated.sequence([
+                Animated.parallel([
+                    Animated.timing(scale, {
+                        toValue: 1.5,
+                        duration: 1000,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(opacity, {
+                        toValue: 0,
+                        duration: 1000,
+                        useNativeDriver: true,
+                    }),
+                ]),
+                Animated.parallel([
+                    Animated.timing(scale, {
+                        toValue: 1,
+                        duration: 0,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(opacity, {
+                        toValue: 0.5,
+                        duration: 0,
+                        useNativeDriver: true,
+                    }),
+                ]),
+            ])
+        ).start();
+    }, []);
+
+    return (
+        <View style={{ width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}>
+            <Animated.View
+                style={{
+                    position: 'absolute',
+                    width: 16,
+                    height: 16,
+                    borderRadius: 8,
+                    backgroundColor: color,
+                    transform: [{ scale }],
+                    opacity,
+                }}
+            />
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
+        </View>
+    );
+};
 
 export const OrderHistoryScreen = () => {
     const navigation = useNavigation<any>();
@@ -58,25 +110,25 @@ export const OrderHistoryScreen = () => {
     const renderOrderItem = ({ item }: { item: any }) => {
         const isActive = isActiveStatus(item.status);
         const isDelivered = item.status === 'delivered';
+        const isPending = item.status === 'pending' || item.status === 'placing_order';
+        const isAwaitConfirmation = item.status === 'awaitconfirmation';
 
         const date = new Date(item.createdAt);
         const formattedDate = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
         const formattedTime = date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
         const firstItem = item.items?.[0];
-        const itemName = firstItem?.item || firstItem?.id?.name || 'Order';
-        const moreCount = (item.items?.length || 1) - 1;
+        const totalItems = item.items?.length || 0;
+        const itemCountText = `${totalItems} Item${totalItems !== 1 ? 's' : ''}`;
 
         // Status styling
-        let statusGradient = ['#F3F4F6', '#E5E7EB'];
         let statusText = item.status.replace(/_/g, ' ').replace(/-/g, ' ');
-        let statusTextColor: string = colors.textLight;
 
         // Map status to user-friendly labels
         const statusLabels: { [key: string]: string } = {
-            'pending': 'Pending',
-            'confirmed': 'Confirmed',
-            'accepted': 'Accepted',
+            'pending': 'Assigning Partner',
+            'confirmed': 'Order Confirmed',
+            'accepted': 'Partner Assigned',
             'preparing': 'Preparing',
             'out_for_delivery': 'On the Way',
             'in-progress': 'On the Way',
@@ -87,21 +139,66 @@ export const OrderHistoryScreen = () => {
 
         statusText = statusLabels[item.status] || item.status;
 
-        if (isActive) {
-            if (item.status === 'awaitconfirmation') {
-                statusGradient = ['#D1FAE5', '#A7F3D0'];
-                statusTextColor = '#065F46';
-            } else if (item.status === 'out_for_delivery' || item.status === 'in-progress') {
-                statusGradient = ['#DBEAFE', '#BFDBFE'];
-                statusTextColor = '#1E40AF';
-            } else {
-                statusGradient = ['#FEF3C7', '#FDE68A'];
-                statusTextColor = '#92400E';
+        // Render Action Button based on Status
+        const renderActionBtn = () => {
+            if (isPending) {
+                return (
+                    <View style={styles.pendingContainer}>
+                        <PulsingOrb color={colors.primary} />
+                        <MonoText size="xs" color={colors.primary} weight="bold" style={{ marginLeft: 6 }}>
+                            Assigning...
+                        </MonoText>
+                    </View>
+                );
             }
-        } else if (isDelivered) {
-            statusGradient = ['#D1FAE5', '#A7F3D0'];
-            statusTextColor = '#065F46';
-        }
+
+            if (isDelivered) {
+                return (
+                    <TouchableOpacity style={styles.secondaryActionBtn}>
+                        <MonoText size="xs" weight="bold" color={colors.text}>Receipt</MonoText>
+                        <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" style={{ marginLeft: 4 }}>
+                            <Path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </Svg>
+                    </TouchableOpacity>
+                );
+            }
+
+            if (isAwaitConfirmation) {
+                return (
+                    <TouchableOpacity
+                        style={[styles.trackBtnFormatted, { backgroundColor: '#059669', paddingHorizontal: 12 }]}
+                        onPress={() => navigateToTracking(item._id)}
+                    >
+                        <MonoText size="xs" weight="bold" color={colors.white}>Confirm</MonoText>
+                        <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2.5" style={{ marginLeft: 4 }}>
+                            <Path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                            <Polyline points="22 4 12 14.01 9 11.01" />
+                        </Svg>
+                    </TouchableOpacity>
+                );
+            }
+
+            if (isActive) {
+                return (
+                    <TouchableOpacity onPress={() => navigateToTracking(item._id)} style={styles.trackBtnFormatted}>
+                        <MonoText size="xs" weight="bold" color={colors.white}>Track</MonoText>
+                        <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2.5" style={{ marginLeft: 4 }}>
+                            <Path d="M5 12h14M12 5l7 7-7 7" />
+                        </Svg>
+                    </TouchableOpacity>
+                );
+            }
+
+            // Default / Cancelled => Details
+            return (
+                <View style={styles.detailsLink}>
+                    <MonoText size="xs" weight="bold" color={colors.textLight}>Details</MonoText>
+                    <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" style={{ marginLeft: 2 }}>
+                        <Path d="M9 18l6-6-6-6" />
+                    </Svg>
+                </View>
+            );
+        };
 
         return (
             <TouchableOpacity
@@ -109,62 +206,64 @@ export const OrderHistoryScreen = () => {
                 style={styles.orderCard}
                 onPress={() => navigateToTracking(item._id)}
             >
-                {/* Left accent bar */}
-                <View style={[
-                    styles.accentBar,
-                    { backgroundColor: isActive ? colors.primary : isDelivered ? '#10B981' : '#9CA3AF' }
-                ]} />
+                {/* Glass Background */}
+                <BlurView
+                    style={StyleSheet.absoluteFill}
+                    blurType="light"
+                    blurAmount={15}
+                    reducedTransparencyFallbackColor="white"
+                />
 
-                <View style={styles.cardContent}>
-                    {/* Top row */}
-                    <View style={styles.topRow}>
-                        <View style={styles.itemInfo}>
-                            <MonoText weight="bold" size="m" numberOfLines={1} style={{ maxWidth: 180 }}>
-                                {itemName}
+                {/* Content Container */}
+                <View style={styles.cardInnerContent}>
+
+                    {/* Top Section: Date & ID */}
+                    <View style={styles.cardHeaderRow}>
+                        <View style={styles.tagContainer}>
+                            <MonoText size="xs" weight="bold" color={colors.textLight}>
+                                #{item._id.slice(-6).toUpperCase()}
                             </MonoText>
-                            {moreCount > 0 && (
-                                <View style={styles.moreBadge}>
-                                    <MonoText size="xs" color={colors.textLight}>+{moreCount}</MonoText>
-                                </View>
-                            )}
+                        </View>
+                        <MonoText size="xs" color={colors.textLight}>
+                            {formattedDate}, {formattedTime}
+                        </MonoText>
+                    </View>
+
+                    {/* Main Content: Items & Price */}
+                    <View style={styles.mainInfoRow}>
+                        <View style={styles.itemInfo}>
+                            <MonoText weight="bold" size="l" style={{ marginRight: 8 }}>
+                                {itemCountText}
+                            </MonoText>
                         </View>
                         <MonoText weight="bold" size="l" color={colors.black}>
                             ₹{item.totalPrice}
                         </MonoText>
                     </View>
 
-                    {/* Middle row - date & order id */}
-                    <View style={styles.middleRow}>
-                        <MonoText size="s" color={colors.textLight}>
-                            {formattedDate} at {formattedTime}
-                        </MonoText>
-                        <MonoText size="xs" color={colors.textLight} style={styles.orderId}>
-                            #{item._id.slice(-6).toUpperCase()}
-                        </MonoText>
-                    </View>
+                    {/* Divider */}
+                    <View style={styles.cardDivider} />
 
-                    {/* Bottom row - status */}
-                    <View style={styles.bottomRow}>
-                        <LinearGradient
-                            colors={statusGradient}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.statusPill}
-                        >
-                            {isActive && <View style={styles.liveDot} />}
-                            <MonoText size="xs" weight="bold" color={statusTextColor}>
+                    {/* Bottom Section: Status & Action */}
+                    <View style={styles.cardBottomRow}>
+                        {/* Status Badge - Coupon Style */}
+                        <View style={[
+                            styles.statusBadgeNeoglass,
+                            {
+                                borderColor: isActive ? colors.primary : isDelivered ? '#10B981' : '#9CA3AF',
+                                backgroundColor: isActive ? 'rgba(255, 71, 0, 0.05)' : isDelivered ? 'rgba(16, 185, 129, 0.05)' : 'rgba(16, 185, 129, 0)',
+                                paddingVertical: 6, // Minimized
+                                paddingHorizontal: 10 // Minimized
+                            }
+                        ]}>
+                            {isActive && <View style={[styles.liveDot, { backgroundColor: colors.primary }]} />}
+                            <MonoText size="xs" weight="bold" color={isActive ? colors.primary : isDelivered ? '#10B981' : colors.textLight}>
                                 {statusText.toUpperCase()}
                             </MonoText>
-                        </LinearGradient>
+                        </View>
 
-                        {isActive && (
-                            <View style={styles.trackBtn}>
-                                <MonoText size="xs" weight="bold" color={colors.primary}>Track</MonoText>
-                                <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2.5">
-                                    <Path d="M5 12h14M12 5l7 7-7 7" />
-                                </Svg>
-                            </View>
-                        )}
+                        {/* Dynamic Action Button */}
+                        {renderActionBtn()}
                     </View>
                 </View>
             </TouchableOpacity>
@@ -318,30 +417,30 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     listContent: {
-        paddingHorizontal: 20,
-        paddingTop: 20,
+        paddingHorizontal: 16, // Minimized from 20
+        paddingTop: 16,
         paddingBottom: 100,
     },
     orderCard: {
-        flexDirection: 'row',
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        marginBottom: 14,
-        overflow: 'hidden',
-        // Soft shadow
-        // Soft shadow
+        borderRadius: 16, // Slightly reduced radius for compactness
+        marginBottom: 12, // Reduced from 16
+        overflow: 'hidden', // Essential for BlurView
+        borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.05)',
+        // Neoglass shadow
         ...Platform.select({
             ios: {
                 shadowColor: '#000',
                 shadowOffset: { width: 0, height: 2 },
                 shadowOpacity: 0.04,
-                shadowRadius: 8,
+                shadowRadius: 6,
             },
             android: {
                 elevation: 2,
             },
         }),
     },
+
     skeletonOrderCard: {
         flexDirection: 'row',
         backgroundColor: '#FFFFFF',
@@ -351,66 +450,96 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#F0F0F0',
     },
-    accentBar: {
-        width: 4,
+    cardInnerContent: {
+        padding: 16, // Minimized from 20
+        backgroundColor: 'rgba(255, 255, 255, 0.6)',
     },
-    cardContent: {
-        flex: 1,
-        padding: 16,
-    },
-    topRow: {
+    cardHeaderRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
+        alignItems: 'center',
+        marginBottom: 10, // Minimized from 12
+    },
+    tagContainer: {
+        backgroundColor: 'rgba(0,0,0,0.04)',
+        paddingHorizontal: 6, // Minimized
+        paddingVertical: 2, // Minimized
+        borderRadius: 4,
+    },
+    mainInfoRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12, // Minimized from 16
     },
     itemInfo: {
         flexDirection: 'row',
         alignItems: 'center',
         flex: 1,
     },
-    moreBadge: {
-        marginLeft: 8,
-        backgroundColor: '#F3F4F6',
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 10,
+    cardDivider: {
+        height: 1,
+        backgroundColor: 'rgba(0,0,0,0.06)',
+        marginBottom: 12, // Minimized from 16
     },
-    middleRow: {
+    cardBottomRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginTop: 8,
     },
-    orderId: {
-        fontFamily: 'monospace',
-    },
-    bottomRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginTop: 14,
-        paddingTop: 14,
-        borderTopWidth: 1,
-        borderTopColor: '#F5F5F5',
-    },
-    statusPill: {
+    statusBadgeNeoglass: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 12,
+        paddingHorizontal: 10,
         paddingVertical: 6,
-        borderRadius: 20,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderStyle: 'dashed',
+    },
+    trackBtnFormatted: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.primary,
+        paddingVertical: 6, // Minimized
+        paddingHorizontal: 12, // Minimized
+        borderRadius: 10,
+        ...Platform.select({
+            ios: {
+                shadowColor: colors.primary,
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.2,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
+    },
+    detailsLink: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 6,
+        paddingHorizontal: 4,
+    },
+    secondaryActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 6, // Minimized
+        paddingHorizontal: 10, // Minimized
+        borderRadius: 8,
+        backgroundColor: '#F3F4F6',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    pendingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     liveDot: {
         width: 6,
         height: 6,
         borderRadius: 3,
-        backgroundColor: '#F59E0B',
         marginRight: 6,
-    },
-    trackBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
     },
     emptyState: {
         alignItems: 'center',

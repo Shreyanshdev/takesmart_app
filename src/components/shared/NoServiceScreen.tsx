@@ -34,15 +34,12 @@ export const NoServiceScreen = () => {
 
 const styles = StyleSheet.create({
     container: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
+        flex: 1,
+        minHeight: 350,
         backgroundColor: colors.background,
-        zIndex: 1000, // High z-index to cover everything
         alignItems: 'center',
         justifyContent: 'center',
+        paddingVertical: spacing.xxl,
     },
     content: {
         alignItems: 'center',
@@ -89,3 +86,4 @@ const styles = StyleSheet.create({
         lineHeight: 24,
     },
 });
+

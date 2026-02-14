@@ -19,7 +19,7 @@ export const useWishlistStore = create<WishlistState>()(
         (set, get) => ({
             wishlist: [],
             addToWishlist: (product) => {
-                const itemId = product.variants?.[0]?.inventoryId || product._id;
+                const itemId = product.inventoryId || product._id;
                 if (!get().isInWishlist(itemId)) {
                     set((state) => ({ wishlist: [product, ...state.wishlist] }));
                 }
@@ -27,28 +27,20 @@ export const useWishlistStore = create<WishlistState>()(
             removeFromWishlist: (itemId) => {
                 set((state) => ({
                     wishlist: state.wishlist.filter((item) => {
-                        const variantId = item.variants?.[0]?.inventoryId || item.variants?.[0]?._id;
-                        return item._id !== itemId && variantId !== itemId;
+                        const invId = item.inventoryId || item._id;
+                        return item._id !== itemId && invId !== itemId;
                     }),
                 }));
             },
             toggleWishlist: async (product, inventoryId) => {
                 // Optimistic UI update
-                const itemId = inventoryId || product.variants?.[0]?.inventoryId || product._id;
+                const itemId = inventoryId || product.inventoryId || product._id;
                 const isFavorite = get().isInWishlist(itemId);
 
                 if (isFavorite) {
                     get().removeFromWishlist(itemId);
                 } else {
-                    // Ensure the product being added has ONLY the target variant if inventoryId is provided
-                    let productToAdd = product;
-                    if (inventoryId && product.variants) {
-                        const targetVariant = product.variants.find(v => (v._id || v.inventoryId) === inventoryId);
-                        if (targetVariant) {
-                            productToAdd = { ...product, variants: [targetVariant] };
-                        }
-                    }
-                    get().addToWishlist(productToAdd);
+                    get().addToWishlist(product);
                 }
 
                 try {
@@ -57,14 +49,7 @@ export const useWishlistStore = create<WishlistState>()(
                     console.error('Failed to toggle wishlist on backend:', error);
                     // Revert on failure
                     if (isFavorite) {
-                        let productToRestore = product;
-                        if (inventoryId && product.variants) {
-                            const targetVariant = product.variants.find(v => (v._id || v.inventoryId) === inventoryId);
-                            if (targetVariant) {
-                                productToRestore = { ...product, variants: [targetVariant] };
-                            }
-                        }
-                        get().addToWishlist(productToRestore);
+                        get().addToWishlist(product);
                     } else {
                         get().removeFromWishlist(itemId);
                     }
@@ -72,14 +57,24 @@ export const useWishlistStore = create<WishlistState>()(
             },
             isInWishlist: (itemId) => {
                 return get().wishlist.some((item) => {
-                    const variantId = item.variants?.[0]?.inventoryId || item.variants?.[0]?._id;
-                    return item._id === itemId || variantId === itemId;
+                    const invId = item.inventoryId || item._id;
+                    return item._id === itemId || invId === itemId;
                 });
             },
             syncWishlist: async (branchId?: string) => {
                 try {
                     const remoteWishlist = await wishlistService.getWishlist(branchId);
-                    set({ wishlist: remoteWishlist });
+
+                    // Deduplicate remote wishlist items
+                    const seenIds = new Set<string>();
+                    const uniqueWishlist = (remoteWishlist || []).filter((item: any) => {
+                        const id = item.inventoryId || item._id;
+                        if (seenIds.has(id)) return false;
+                        seenIds.add(id);
+                        return true;
+                    });
+
+                    set({ wishlist: uniqueWishlist });
                 } catch (error) {
                     console.error('Failed to sync wishlist:', error);
                 }

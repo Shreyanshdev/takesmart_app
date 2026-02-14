@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { colors } from '../../theme/colors';
-import { MonoText } from '../shared/MonoText';
+import { MonoText } from './MonoText';
 
 interface DualCartButtonProps {
     normalCount: number;

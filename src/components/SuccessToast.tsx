@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
         right: spacing.l,
         height: 54,
         borderRadius: 27,
-        overflow: 'hidden',
+        overflow: 'hidden', // Removed to ensure standard shadow behavior if needed, but primarily added bg color below
         zIndex: 10000,
         elevation: 10000,
         borderWidth: 1,

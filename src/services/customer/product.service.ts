@@ -7,6 +7,7 @@ export interface InventoryVariant {
     weightValue: number;
     weightUnit: 'ml' | 'l' | 'g' | 'kg' | 'pcs' | 'dozen';
     images?: string[];
+    maxQtyPerOrder?: number;
 }
 
 // Inventory Pricing Type (from backend Inventory model)
@@ -95,6 +96,21 @@ export interface Category {
     icon?: string;
     color?: string;
     isActive?: boolean;
+    order?: number;
+}
+
+export interface SubCategory {
+    _id: string;
+    name: string;
+    image: string;
+    category: string | Category;
+    isActive?: boolean;
+    order?: number;
+}
+
+export interface SubCategoryGrouped {
+    category: Category;
+    subcategories: SubCategory[];
 }
 
 export const productService = {
@@ -108,12 +124,80 @@ export const productService = {
         return [];
     },
 
+    // Fetch all subcategories
+    getSubCategories: async (): Promise<SubCategory[]> => {
+        const response = await api.get('products/subcategories');
+        return Array.isArray(response.data) ? response.data : [];
+    },
+
+    // Fetch subcategories by category
+    getSubCategoriesByCategory: async (categoryId: string): Promise<SubCategory[]> => {
+        const response = await api.get(`products/subcategories/${categoryId}`);
+        return Array.isArray(response.data) ? response.data : [];
+    },
+
+    // Fetch subcategories grouped by category (for Categories screen)
+    getSubCategoriesGrouped: async (): Promise<SubCategoryGrouped[]> => {
+        const response = await api.get('products/subcategories/grouped');
+        return Array.isArray(response.data) ? response.data : [];
+    },
+
     // Fetch all products (with optional branch context for inventory pricing)
+    // DEPRECATED: Use getProductsFeed for optimized paginated fetching
     getAllProducts: async (branchId?: string): Promise<Product[]> => {
         const url = branchId ? `products?branchId=${branchId}` : 'products';
         const response = await api.get(url);
         return response.data?.products || [];
     },
+
+    /**
+     * Fetch products with cursor-based pagination (OPTIMIZED)
+     * 
+     * Industry-grade like Zepto/Blinkit:
+     * - Cursor-based pagination (efficient, no offset issues)
+     * - Lightweight response (only data needed for product cards)
+     * - Branch-based filtering (required)
+     * 
+     * @param branchId - Required branch ID
+     * @param options.limit - Number of products (default: 20, max: 50)
+     * @param options.cursor - Last product ID from previous request
+     * @param options.category - Optional category filter
+     * @param options.subcategory - Optional subcategory filter (takes precedence over category)
+     */
+    getProductsFeed: async (
+        branchId: string,
+        options: {
+            limit?: number;
+            cursor?: string;
+            category?: string;
+            subcategory?: string;
+            brand?: string;
+        } = {}
+    ): Promise<{
+
+        products: Product[];
+        nextCursor: string | null;
+        hasMore: boolean;
+        count: number;
+    }> => {
+        const { limit = 20, cursor, category, subcategory, brand } = options;
+
+        let url = `products/feed?branchId=${branchId}&limit=${limit}`;
+        if (cursor) url += `&cursor=${cursor}`;
+        if (subcategory) url += `&subcategory=${subcategory}`;
+        else if (category) url += `&category=${category}`;
+        if (brand) url += `&brand=${encodeURIComponent(brand)}`;
+
+
+        const response = await api.get(url);
+        return {
+            products: response.data?.products || [],
+            nextCursor: response.data?.nextCursor || null,
+            hasMore: response.data?.hasMore || false,
+            count: response.data?.count || 0
+        };
+    },
+
 
     // Fetch products by category
     getProductsByCategory: async (categoryId: string, branchId?: string): Promise<Product[]> => {
@@ -130,7 +214,15 @@ export const productService = {
             ? `products/${productId}?branchId=${branchId}`
             : `products/${productId}`;
         const response = await api.get(url);
-        return response.data?.product || null;
+
+        // Backend returns { product, variants } - merge them together
+        if (response.data?.product) {
+            return {
+                ...response.data.product,
+                variants: response.data.variants || []
+            };
+        }
+        return null;
     },
 
     // Search products
@@ -150,12 +242,12 @@ export const productService = {
     },
 
     // Fetch related products for a given product
-    getRelatedProducts: async (productId: string, branchId?: string, limit = 8): Promise<Product[]> => {
+    getRelatedProducts: async (productId: string, branchId?: string, page = 1, limit = 8): Promise<{ products: Product[], pagination: any }> => {
         const url = branchId
-            ? `products/${productId}/related?branchId=${branchId}&limit=${limit}`
-            : `products/${productId}/related?limit=${limit}`;
+            ? `products/${productId}/related?branchId=${branchId}&page=${page}&limit=${limit}`
+            : `products/${productId}/related?page=${page}&limit=${limit}`;
         const response = await api.get(url);
-        return Array.isArray(response.data) ? response.data : [];
+        return response.data;
     },
 
     // Fetch products by brand name
@@ -187,6 +279,17 @@ export const productService = {
         }>;
     }> => {
         const response = await api.post('inventory/validate-cart', { items });
+        return response.data;
+    },
+
+    // Decisive quantity update from backend
+    updateCartItemQty: async (inventoryId: string, requestedQty: number): Promise<{
+        success: boolean;
+        finalQty: number;
+        message: string;
+        availableStock: number;
+    }> => {
+        const response = await api.post('inventory/update-item-qty', { inventoryId, requestedQty });
         return response.data;
     }
 };

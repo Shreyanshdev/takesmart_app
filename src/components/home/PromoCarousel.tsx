@@ -14,7 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { MonoText } from '../shared/MonoText';
 import { colors } from '../../theme/colors';
 import { BannerSlide } from '../../services/customer/banner.service';
-import { ProductDetailsModal } from '../home/ProductDetailsModal';
+import { ProductDetailsModal } from './ProductDetailsModal';
 import { productService } from '../../services/customer/product.service';
 
 const { width } = Dimensions.get('window');
