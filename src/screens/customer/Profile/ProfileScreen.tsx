@@ -112,7 +112,7 @@ export const ProfileScreen = () => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+            <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
             {/* Simple Large Header */}
             <View style={[styles.header, { paddingTop: insets.top, paddingBottom: 30 }]}>

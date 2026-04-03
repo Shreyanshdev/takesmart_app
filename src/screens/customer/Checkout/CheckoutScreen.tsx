@@ -11,7 +11,8 @@ import { RAZORPAY_KEY_ID } from '@env'; // Ensure you have this configured
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';
 import { MonoText } from '../../../components/shared/MonoText';
-import { ProductGridCard } from '../../../components/shared/ProductGridCard';
+import { StripProductCard } from '../../../components/home/ProductStrip';
+import { FlashList } from '@shopify/flash-list';
 import { useCartStore } from '../../../store/cart.store';
 import { useToastStore } from '../../../store/toast.store';
 import { productService, Product } from '../../../services/customer/product.service';
@@ -93,6 +94,7 @@ export const CheckoutScreen = () => {
 
     // Stock Validation State
     const [isValidatingStock, setIsValidatingStock] = useState(false);
+    const [isSyncingQty, setIsSyncingQty] = useState(false);
     const [stockErrors, setStockErrors] = useState<Record<string, { status: string, message: string, available: number }>>({});
     const [hasCriticalStockIssue, setHasCriticalStockIssue] = useState(false);
 
@@ -114,10 +116,11 @@ export const CheckoutScreen = () => {
         onPrimaryPress: () => { },
     });
 
-    // Debounced Quantity Sync
+    // Debounced Quantity Sync with stock validation feedback
     const debouncedSync = useMemo(
         () => debounce(async (inventoryId: string, qty: number) => {
             try {
+                setIsSyncingQty(true);
                 const response = await productService.updateCartItemQty(inventoryId, qty);
                 if (response.success) {
                     // Sync back with backend decision
@@ -128,9 +131,11 @@ export const CheckoutScreen = () => {
                 }
             } catch (err) {
                 console.error('[Checkout] Sync failed:', err);
+            } finally {
+                setIsSyncingQty(false);
             }
         }, 300),
-        []
+        [updateQuantity, showToast]
     );
 
     const insets = useSafeAreaInsets();
@@ -360,8 +365,15 @@ export const CheckoutScreen = () => {
     }, [items, stockErrors]);
 
     const cartTotal = getTotalPrice();
-    const finalDeliveryCharge = deliveryHigh;
     const baseTotal = cartTotal;
+
+    // Determine final delivery charge checking coupon
+    const finalDeliveryCharge = useMemo(() => {
+        if (appliedCoupon?.discountType === 'FREE_DELIVERY') {
+            return 0;
+        }
+        return deliveryHigh;
+    }, [appliedCoupon, deliveryHigh]);
 
     // MRP Total (sum of MRP * quantity for all items)
     const mrpTotal = useMemo(() => {
@@ -727,7 +739,10 @@ export const CheckoutScreen = () => {
         const stockError = stockErrors[inventoryId];
         const isActuallyOutOfStock = stockError?.status === 'OUT_OF_STOCK' || stockError?.status === 'NOT_FOUND' || item.quantity === 0;
 
-        const handleDecrease = () => {
+                const handleDecrease = () => {
+                    if (isValidatingStock || isSyncingQty || placingOrder) {
+                        return;
+                    }
             if (item.quantity <= 0) {
                 showToast('Product quantity is already at minimum!');
                 return;
@@ -813,6 +828,9 @@ export const CheckoutScreen = () => {
                         <View style={styles.checkoutQtyContainer}>
                             <TouchableOpacity
                                 onPress={() => {
+                                    if (isValidatingStock || isSyncingQty || placingOrder) {
+                                        return;
+                                    }
                                     const newQty = item.quantity - 1;
                                     if (newQty <= 0) {
                                         setItemToRemove(item);
@@ -839,6 +857,9 @@ export const CheckoutScreen = () => {
 
                             <TouchableOpacity
                                 onPress={() => {
+                                    if (isValidatingStock || isSyncingQty || placingOrder) {
+                                        return;
+                                    }
                                     const newQty = item.quantity + 1;
 
                                     // 1. Optimistic Update
@@ -981,6 +1002,9 @@ export const CheckoutScreen = () => {
                 </TouchableOpacity>
                 <MonoText size="l" weight="bold">Checkout</MonoText>
                 <View style={{ width: 40 }} />
+                {(isValidatingStock || isSyncingQty) && (
+                    <View style={styles.headerLoadingBar} />
+                )}
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
@@ -1020,42 +1044,38 @@ export const CheckoutScreen = () => {
                             <MonoText size="m" weight="bold">Before you checkout</MonoText>
                             <MonoText size="xs" color={colors.textLight} style={{ marginTop: 2 }}>You might need these fresh items too</MonoText>
                         </View>
-                        <FlatList
+                        <FlashList
                             horizontal
                             data={suggestionProducts}
                             showsHorizontalScrollIndicator={false}
-                            keyExtractor={(p) => `${p._id}_${p.inventoryId}`}
+                            keyExtractor={(p: any) => `${p._id}_${p.inventoryId}`}
                             contentContainerStyle={{ paddingRight: spacing.l }}
-                            ItemSeparatorComponent={() => <View style={{ width: 14 }} />}
-                            renderItem={({ item: p }) => {
-                                // Products now have embedded variant data from flattened API
-                                const variantData = {
-                                    _id: p.inventoryId,
-                                    inventoryId: p.inventoryId,
-                                    variant: p.variant,
-                                    pricing: p.pricing,
-                                    stock: p.stock,
-                                    isAvailable: p.isAvailable
-                                };
-                                const cartItemId = p.inventoryId || p._id;
-                                return (
-                                    <ProductGridCard
-                                        product={p}
-                                        variant={variantData}
-                                        quantity={getItemQuantity(cartItemId)}
-                                        width={160}
-                                        onPress={() => handleProductPress(p, p.inventoryId)}
-                                        onAddToCart={handleAddToCartFromSuggestions}
-                                        onRemoveFromCart={removeFromCart}
-                                    />
-                                );
-                            }}
+                            estimatedItemSize={147}
+                            nestedScrollEnabled={true}
+                            directionalLockEnabled={true}
+                            ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+                            renderItem={({ item: p }: { item: any }) => (
+                                <StripProductCard
+                                    item={p}
+                                    style={{ width: 135 }}
+                                    onPress={() => handleProductPress(p, p.inventoryId)}
+                                    onAddToCart={() => handleAddToCartFromSuggestions(p, {
+                                        _id: p.inventoryId,
+                                        inventoryId: p.inventoryId,
+                                        variant: p.variant,
+                                        pricing: p.pricing,
+                                        stock: p.stock,
+                                        isAvailable: p.isAvailable
+                                    })}
+                                    onRemoveFromCart={() => removeFromCart(p.inventoryId || p._id)}
+                                />
+                            )}
                         />
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
                             <View style={{ flex: 1, height: 1.5, backgroundColor: colors.border, opacity: 0.6 }} />
                             <TouchableOpacity
                                 style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 16 }}
-                                onPress={() => navigation.navigate('Home')}
+                                onPress={() => navigation.goBack()}
                             >
                                 <MonoText size="s" weight="bold" color={colors.primary} style={{ textDecorationLine: 'underline' }}>
                                     Something still left? Add now
@@ -1248,7 +1268,7 @@ export const CheckoutScreen = () => {
                     <TouchableOpacity
                         style={[
                             styles.newPayBtn,
-                            (placingOrder || isOutOfRange || !address || hasCriticalStockIssue) && styles.payBtnDisabled
+                            (placingOrder || isOutOfRange || !address || hasCriticalStockIssue || isValidatingStock || isSyncingQty) && styles.payBtnDisabled
                         ]}
                         onPress={() => {
                             if (paymentMethod === 'online') {
@@ -1257,7 +1277,7 @@ export const CheckoutScreen = () => {
                                 handleCodPayment();
                             }
                         }}
-                        disabled={placingOrder || isOutOfRange || !address || hasCriticalStockIssue || items.some(i => i.quantity <= 0)}
+                        disabled={placingOrder || isOutOfRange || !address || hasCriticalStockIssue || isValidatingStock || isSyncingQty || items.some(i => i.quantity <= 0)}
                     >
                         <View style={styles.payBtnContent}>
                             <MonoText weight="bold" color={colors.white} size="m">
@@ -1285,6 +1305,11 @@ export const CheckoutScreen = () => {
                     </TouchableOpacity>
                 </View>
             </View>
+
+            {/* Global touch blocker during stock validation / sync */}
+            {(isValidatingStock || isSyncingQty) && (
+                <View pointerEvents="auto" style={styles.validationBlocker} />
+            )}
 
             {/* Payment Method Modal */}
             <Modal
@@ -1544,6 +1569,14 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255, 255, 255, 0.85)', // Glass opacity
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(230, 230, 230, 0.5)',
+    },
+    headerLoadingBar: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 3,
+        backgroundColor: colors.primary,
     },
     backBtn: {
         width: 40,
@@ -2119,6 +2152,11 @@ const styles = StyleSheet.create({
                 elevation: 10,
             },
         }),
+    },
+    validationBlocker: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 150,
+        backgroundColor: 'transparent',
     },
     stickyDeliveryContainer: {
         flexDirection: 'row',

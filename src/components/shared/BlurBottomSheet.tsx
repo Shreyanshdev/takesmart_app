@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, Modal, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
 import { BlurView } from '@react-native-community/blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 
@@ -15,6 +16,8 @@ export const BlurBottomSheet: React.FC<BlurBottomSheetProps> = ({
     onClose,
     children,
 }) => {
+    const insets = useSafeAreaInsets();
+
     return (
         <Modal
             visible={visible}
@@ -34,8 +37,8 @@ export const BlurBottomSheet: React.FC<BlurBottomSheetProps> = ({
                     blurAmount={10}
                     reducedTransparencyFallbackColor="white"
                 />
-                <View style={styles.overlay} />
-                <View style={styles.content}>
+                <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose} />
+                <View style={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 10 }]}>
                     <View style={styles.handle} />
                     {children}
                 </View>
@@ -68,7 +71,6 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         padding: spacing.l,
-        paddingBottom: 30,
         shadowColor: colors.black,
         shadowOffset: {
             width: 0,

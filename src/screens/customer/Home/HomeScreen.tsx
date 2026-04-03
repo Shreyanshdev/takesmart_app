@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet, StatusBar, TouchableOpacity, Platform } from 'react-native';
+import { View, StyleSheet, StatusBar, TouchableOpacity, Platform, RefreshControl } from 'react-native';
 import Animated, { useAnimatedScrollHandler, useSharedValue, runOnJS } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HomeHeader } from '../../../components/home/HomeHeader';
@@ -12,14 +12,15 @@ import { ProductDetailsModal } from '../../../components/home/ProductDetailsModa
 import { FloatingCarts } from '../../../components/home/FloatingCarts';
 import { ProductGridCard } from '../../../components/shared/ProductGridCard';
 import { ProductSkeleton } from '../../../components/shared/ProductSkeleton';
-import { BannerSkeleton, CategoryGridSkeleton } from '../../../components/home/HomeSkeletons';
+import { BannerSkeleton, CategoryGridSkeleton, HomeFullSkeleton } from '../../../components/home/HomeSkeletons';
 import { BrandFooter } from '../../../components/shared/BrandFooter';
 import { useCartStore } from '../../../store/cart.store';
 import { useToastStore } from '../../../store/toast.store';
 import { Product } from '../../../services/customer/product.service';
-import { bannerService, Banner } from '../../../services/customer/banner.service';
 import { PromoCarousel } from '../../../components/home/PromoCarousel';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { DynamicSection } from '../../../components/home/DynamicSection';
+import { SectionHeader } from '../../../components/home/SectionHeader';
+import { StackScreenProps } from '@react-navigation/stack';
 import { useShallow } from 'zustand/react/shallow';
 import { Dimensions } from 'react-native';
 import { useBranchStore } from '../../../store/branch.store';
@@ -29,16 +30,19 @@ import { FlashList } from '@shopify/flash-list';
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 36) / 2; // 12 padding on sides + 12 gap = 36
 
-type HomeScreenProps = NativeStackScreenProps<any, 'Home'>;
+type HomeScreenProps = StackScreenProps<any, 'Home'>;
 
 export const HomeScreen = ({ navigation }: HomeScreenProps) => {
     const insets = useSafeAreaInsets();
     const {
         setTabBarVisible,
         fetchHomeData,
+        fetchHomeLayout,
         loadMoreProducts,
         categories,
         normalProducts,
+        homeLayoutSections,
+        isLayoutLoading,
         isLoading,
         isLoadingMore,
         hasMore,
@@ -46,26 +50,38 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
     } = useHomeStore(useShallow((state: HomeState) => ({
         setTabBarVisible: state.setTabBarVisible,
         fetchHomeData: state.fetchHomeData,
+        fetchHomeLayout: state.fetchHomeLayout,
         loadMoreProducts: state.loadMoreProducts,
         categories: state.categories,
         normalProducts: state.normalProducts,
+        homeLayoutSections: state.homeLayoutSections,
+        isLayoutLoading: state.isLayoutLoading,
         isLoading: state.isLoading,
         isLoadingMore: state.isLoadingMore,
         hasMore: state.hasMore,
         error: state.error
     })));
 
+
+
     const { currentBranch, isServiceAvailable } = useBranchStore();
     const { addToCart, removeFromCart, getItemQuantity } = useCartStore();
-    // Subscribe to cart items separately to ensure re-renders
     const cartItems = useCartStore(state => state.items);
     const { showToast } = useToastStore();
 
     const [detailsModalVisible, setDetailsModalVisible] = React.useState(false);
     const [selectedDetailProduct, setSelectedDetailProduct] = React.useState<Product | null>(null);
     const [selectedVariantId, setSelectedVariantId] = React.useState<string | null>(null);
-    const [banners, setBanners] = React.useState<Record<string, Banner>>({});
-    const [isBannersLoading, setIsBannersLoading] = React.useState(false);
+    const [refreshing, setRefreshing] = React.useState(false);
+
+    const onRefresh = React.useCallback(async () => {
+        setRefreshing(true);
+        try {
+            await Promise.all([fetchHomeData(), fetchHomeLayout()]);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [fetchHomeData, fetchHomeLayout]);
 
     const handleProductPress = React.useCallback((product: Product, variantId?: string) => {
         setSelectedDetailProduct(product);
@@ -93,9 +109,6 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
             formattedQuantity: variant?.variant ? `${variant.variant.weightValue} ${variant.variant.weightUnit}` : undefined
         } as any);
 
-        console.log('Add to cart result:', success, 'Product ID:', cartItemId, 'Inventory ID:', variant?.inventoryId);
-        console.log('Cart items after add:', cartItems.length);
-
         if (!success) {
             const currentQuantity = getItemQuantity(cartItemId);
             if (currentQuantity >= (variant?.stock || 0)) {
@@ -106,11 +119,9 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
         }
     }, [addToCart, getItemQuantity, showToast, cartItems]);
 
-    // Products are now pre-flattened from the API (each variant = separate product entry)
-    // No filtering needed - API returns only available, in-stock variants
-
     const scrollY = useSharedValue(0);
     const lastScrollY = useSharedValue(0);
+    const isTabBarVisibleSV = useSharedValue(true);
 
     const updateTabBar = (visible: boolean) => {
         setTabBarVisible(visible);
@@ -118,20 +129,9 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
     useEffect(() => {
         fetchHomeData();
-        loadBanners();
-    }, [fetchHomeData, currentBranch]);
+        fetchHomeLayout();
+    }, [fetchHomeData, fetchHomeLayout, currentBranch]);
 
-    const loadBanners = async () => {
-        setIsBannersLoading(true);
-        try {
-            const data = await bannerService.getBanners();
-            setBanners(data);
-        } finally {
-            setIsBannersLoading(false);
-        }
-    };
-
-    // Optimized infinite scroll using FlashList onEndReached
     const handleLoadMore = React.useCallback(() => {
         if (hasMore && !isLoadingMore && isServiceAvailable && !isLoading) {
             loadMoreProducts();
@@ -144,12 +144,21 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
             const diff = currentY - lastScrollY.value;
 
             if (currentY <= 0) {
-                runOnJS(updateTabBar)(true);
+                if (!isTabBarVisibleSV.value) {
+                    isTabBarVisibleSV.value = true;
+                    runOnJS(updateTabBar)(true);
+                }
             } else if (Math.abs(diff) > 20) {
                 if (diff > 0) {
-                    runOnJS(updateTabBar)(false);
+                    if (isTabBarVisibleSV.value) {
+                        isTabBarVisibleSV.value = false;
+                        runOnJS(updateTabBar)(false);
+                    }
                 } else {
-                    runOnJS(updateTabBar)(true);
+                    if (!isTabBarVisibleSV.value) {
+                        isTabBarVisibleSV.value = true;
+                        runOnJS(updateTabBar)(true);
+                    }
                 }
             }
 
@@ -157,8 +166,6 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
             scrollY.value = currentY;
         },
     });
-
-    // Remove early return and handle isLoading inside the main render for a smoother feel
 
     if (error) {
         return (
@@ -174,70 +181,96 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
                     style={{ backgroundColor: colors.primary, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 }}
                     onPress={fetchHomeData}
                 >
-                    <MonoText size="s" weight="bold" color={colors.black}>Try Again</MonoText>
+                    <MonoText size="s" weight="bold" color={colors.white}>Try Again</MonoText>
                 </TouchableOpacity>
             </View>
         );
     }
 
-    // Header content height = topRow(40) + marginBottom(12) + bottomRow(48) + paddingBottom(16) = 116
     const headerPaddingTop = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : insets.top;
     const dynamicPaddingTop = headerPaddingTop + 116;
 
-    const renderHeader = React.useCallback(() => (
-        <View style={{ paddingTop: dynamicPaddingTop }}>
-            {/* No Service State */}
-            {!isServiceAvailable ? (
-                <NoServiceScreen />
-            ) : (
-                <>
-                    {/* Main Promo Banner */}
-                    {isBannersLoading ? (
-                        <BannerSkeleton height={220} variant="full" />
-                    ) : banners['HOME_MAIN'] && banners['HOME_MAIN'].slides.length > 0 && (
-                        <PromoCarousel slides={banners['HOME_MAIN'].slides} height={220} />
-                    )}
+    // Check if we have dynamic sections to render
+    const hasDynamicSections = homeLayoutSections.length > 0;
 
-                    {isLoading ? (
-                        <CategoryGridSkeleton />
-                    ) : (
-                        <CategoryGrid categories={categories} />
-                    )}
+    const renderHeader = React.useCallback(() => {
+        // Find if the first dynamic section is a banner carousel
+        const isFirstSectionBanner = hasDynamicSections && homeLayoutSections[0]?.type === 'BANNER_CAROUSEL';
+        const topBannerSection = isFirstSectionBanner ? homeLayoutSections[0] : null;
+        const otherSections = isFirstSectionBanner ? homeLayoutSections.slice(1) : homeLayoutSections;
 
-                    {/* Secondary Promo Banner */}
-                    {isBannersLoading ? (
-                        <BannerSkeleton height={180} variant="card" />
-                    ) : banners['HOME_SECONDARY'] && banners['HOME_SECONDARY'].slides.length > 0 && (
-                        <PromoCarousel
-                            slides={banners['HOME_SECONDARY'].slides}
-                            height={180}
-                            variant="card"
-                        />
-                    )}
-
-                    {/* Section Title */}
-                    <MonoText size="l" weight="bold" style={styles.sectionTitle}>Shop Now</MonoText>
-
-                    {/* Initial Loading Skeletons */}
-                    {isLoading && (
-                        <View style={styles.grid}>
-                            {[1, 2, 3, 4, 5, 6].map((i) => (
-                                <ProductSkeleton key={`initial-${i}`} width={CARD_WIDTH} />
-                            ))}
+        return (
+            <View style={{ paddingTop: dynamicPaddingTop }}>
+                {/* Main Content Zone */}
+                <View style={styles.contentZone}>
+                    {!isServiceAvailable ? (
+                        <View style={{ backgroundColor: colors.white, borderRadius: 12, padding: 16 }}>
+                            <NoServiceScreen />
                         </View>
+                    ) : (
+                        <>
+                            {hasDynamicSections ? (
+                                <>
+                                    {topBannerSection && (
+                                        <View style={{ paddingBottom: 16 }}>
+                                            <DynamicSection
+                                                key={topBannerSection._id}
+                                                section={topBannerSection}
+                                                index={0}
+                                                onProductPress={handleProductPress}
+                                                isLoading={isLoading}
+                                            />
+                                        </View>
+                                    )}
+                                    {otherSections.map((section, idx) => (
+                                        <DynamicSection
+                                            key={section._id}
+                                            section={section}
+                                            index={isFirstSectionBanner ? idx + 1 : idx}
+                                            onProductPress={handleProductPress}
+                                            isLoading={isLoading}
+                                        />
+                                    ))}
+                                </>
+                            ) : (
+                                <>
+                                    {/* Fallback */}
+                                    {isLayoutLoading || isLoading ? (
+                                        <HomeFullSkeleton />
+                                    ) : (
+                                        <CategoryGrid categories={categories} />
+                                    )}
+                                </>
+                            )}
+
+                            {/* "Shop All Products" section title */}
+                            <SectionHeader title="Shop All Products" subtitle="Browse our entire collection" />
+
+                            {/* Initial Loading Skeletons */}
+                            {isLoading && (
+                                <View style={styles.grid}>
+                                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                                        <View key={`initial-${i}`} style={{ paddingHorizontal: 6, width: '50%' }}>
+                                            <ProductSkeleton width={CARD_WIDTH} />
+                                        </View>
+                                    ))}
+                                </View>
+                            )}
+                        </>
                     )}
-                </>
-            )}
-        </View>
-    ), [isServiceAvailable, isBannersLoading, banners, isLoading, categories, dynamicPaddingTop]);
+                </View>
+            </View>
+        );
+    }, [isServiceAvailable, hasDynamicSections, homeLayoutSections, isLayoutLoading, isLoading, categories, dynamicPaddingTop, handleProductPress]);
 
     const renderFooter = React.useCallback(() => (
         <View style={{ paddingBottom: 100 }}>
-            {/* Skeleton loaders for infinite scroll */}
             {isLoadingMore && (
                 <View style={styles.grid}>
                     {[1, 2, 3, 4].map((i) => (
-                        <ProductSkeleton key={`loading-${i}`} width={CARD_WIDTH} />
+                        <View key={`loading-${i}`} style={{ paddingHorizontal: 6, width: '50%' }}>
+                            <ProductSkeleton width={CARD_WIDTH} />
+                        </View>
                     ))}
                 </View>
             )}
@@ -258,7 +291,6 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
     ), [isLoadingMore, isLoading, normalProducts.length, isServiceAvailable]);
 
     const renderProduct = React.useCallback(({ item }: { item: any }) => {
-        // Use inventoryId for cart lookup (each variant has unique inventoryId)
         const cartItemId = item.inventoryId || item._id;
         const quantity = getItemQuantity(cartItemId);
 
@@ -290,7 +322,6 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
             <HomeHeader scrollY={scrollY} />
 
@@ -307,11 +338,18 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
                 onEndReached={handleLoadMore}
                 onEndReachedThreshold={0.5}
                 scrollEventThrottle={16}
-                removeClippedSubviews={Platform.OS === 'android'}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        colors={[colors.primary]}
+                        tintColor={colors.primary}
+                        progressViewOffset={dynamicPaddingTop}
+                    />
+                }
                 estimatedItemSize={280}
             />
 
-            {/* Product Details Modal */}
             <ProductDetailsModal
                 visible={detailsModalVisible}
                 product={selectedDetailProduct}
@@ -320,7 +358,6 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
             />
 
             <FloatingCarts />
-
         </View>
     );
 };
@@ -328,43 +365,24 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#FAFAFA',
+        backgroundColor: colors.white, // Changed from #FAFAFA to match white zone
     },
     scrollContent: {
         paddingBottom: 100,
+        backgroundColor: colors.white, // Ensure rest of the list is white
     },
-    section: {
-        marginBottom: spacing.l,
-        paddingHorizontal: 12,
-    },
-    sectionTitle: {
-        marginBottom: spacing.m,
-        paddingHorizontal: 12,
+    contentZone: {
+        flex: 1,
+        backgroundColor: colors.white,
     },
     grid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        justifyContent: 'space-evenly',
+        paddingHorizontal: 6,
     },
     center: {
         justifyContent: 'center',
         alignItems: 'center',
-    },
-    noServiceContainer: {
-        padding: spacing.xl,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: 40,
-    },
-    noServiceTitle: {
-        marginTop: 24,
-        marginBottom: 12,
-        textAlign: 'center',
-    },
-    noServiceText: {
-        textAlign: 'center',
-        lineHeight: 22,
-        paddingHorizontal: 20,
     },
     noProductsSection: {
         paddingVertical: 40,
@@ -375,12 +393,4 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         marginHorizontal: 4,
     },
-    loadingMore: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: spacing.l,
-        marginTop: spacing.m,
-    }
 });
-

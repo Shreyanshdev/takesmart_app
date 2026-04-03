@@ -181,17 +181,19 @@ const ProductGridCardComponent: React.FC<ProductGridCardProps> = ({
                 </MonoText>
 
                 {/* Rating Section - Premium Style */}
-                <View style={[styles.ratingRow, isActuallySoldOut && styles.oosOpacity]}>
-                    <Svg width="12" height="12" viewBox="0 0 24 24" fill={colors.success} stroke={colors.success}>
-                        <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
-                    </Svg>
-                    <MonoText size="xs" weight="bold" color={colors.success} style={{ marginLeft: 4 }}>
-                        {product.rating?.average || 4.2}
-                    </MonoText>
-                    <MonoText size="xxs" color={colors.textLight} style={{ marginLeft: 4 }}>
-                        ({product.rating?.count || 120})
-                    </MonoText>
-                </View>
+                {product.rating && product.rating.count > 0 && (
+                    <View style={[styles.ratingRow, isActuallySoldOut && styles.oosOpacity]}>
+                        <Svg width="12" height="12" viewBox="0 0 24 24" fill={colors.success} stroke={colors.success}>
+                            <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
+                        </Svg>
+                        <MonoText size="xs" weight="bold" color={colors.success} style={{ marginLeft: 4 }}>
+                            {product.rating.average.toFixed(1)}
+                        </MonoText>
+                        <MonoText size="xxs" color={colors.textLight} style={{ marginLeft: 4 }}>
+                            ({product.rating.count})
+                        </MonoText>
+                    </View>
+                )}
 
                 {/* Short Description */}
                 {product.shortDescription && (

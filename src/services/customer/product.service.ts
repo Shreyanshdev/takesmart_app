@@ -172,6 +172,9 @@ export const productService = {
             category?: string;
             subcategory?: string;
             brand?: string;
+            sort?: string;
+            minPrice?: number;
+            maxPrice?: number;
         } = {}
     ): Promise<{
 
@@ -180,13 +183,16 @@ export const productService = {
         hasMore: boolean;
         count: number;
     }> => {
-        const { limit = 20, cursor, category, subcategory, brand } = options;
+        const { limit = 20, cursor, category, subcategory, brand, sort, minPrice, maxPrice } = options;
 
         let url = `products/feed?branchId=${branchId}&limit=${limit}`;
         if (cursor) url += `&cursor=${cursor}`;
         if (subcategory) url += `&subcategory=${subcategory}`;
         else if (category) url += `&category=${category}`;
         if (brand) url += `&brand=${encodeURIComponent(brand)}`;
+        if (sort) url += `&sort=${sort}`;
+        if (minPrice !== undefined) url += `&minPrice=${minPrice}`;
+        if (maxPrice !== undefined) url += `&maxPrice=${maxPrice}`;
 
 
         const response = await api.get(url);

@@ -5,7 +5,7 @@ export interface BannerSlide {
     imageUrl: string;
     title?: string;
     buttonText?: string;
-    actionType: 'PRODUCT' | 'CATEGORY' | 'BRAND' | 'NONE';
+    actionType: 'PRODUCT' | 'CATEGORY' | 'BRAND' | 'NONE' | 'SEARCH' | 'DEALS' | 'TRENDING' | 'NEW' | string;
     targetValue?: string;
     order: number;
 }

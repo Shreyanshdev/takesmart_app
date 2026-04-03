@@ -5,10 +5,11 @@ import {
     TouchableOpacity,
     StatusBar,
     Dimensions,
-    ActivityIndicator
+    ScrollView,
+    Platform
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { BlurView } from '@react-native-community/blur';
 import Svg, { Path } from 'react-native-svg';
@@ -102,7 +103,7 @@ export const WishlistScreen = () => {
         const cartItemId = item.inventoryId || item._id;
 
         return (
-            <View style={{ marginHorizontal: 6 }}>
+            <View style={{ paddingHorizontal: 6, marginBottom: 12 }}>
                 <ProductGridCard
                     product={item}
                     variant={variantData}
@@ -125,35 +126,47 @@ export const WishlistScreen = () => {
         <View style={styles.container}>
             <StatusBar barStyle="dark-content" />
 
-            {/* Glass Header */}
-            <BlurView blurType="light" blurAmount={20} style={styles.header}>
-                <SafeAreaView edges={['top']} style={styles.headerContent}>
+            {/* Header — matching OrderHistoryScreen */}
+            <View style={[styles.header, { paddingTop: insets.top }]}>
+                <BlurView
+                    style={StyleSheet.absoluteFill}
+                    blurType="light"
+                    blurAmount={20}
+                    reducedTransparencyFallbackColor="white"
+                />
+                <View style={styles.headerContent}>
                     <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
-                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
                             <Path d="M19 12H5M12 19l-7-7 7-7" />
                         </Svg>
                     </TouchableOpacity>
 
-                    <MonoText size="l" weight="bold" style={{ flex: 1, textAlign: 'center' }}>
+                    <MonoText size="l" weight="bold" style={styles.headerTitle}>
                         My Wishlist
                     </MonoText>
 
                     <TouchableOpacity onPress={() => navigation.navigate('Search')} style={styles.headerBtn}>
-                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
                             <Path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </Svg>
                     </TouchableOpacity>
-                </SafeAreaView>
-            </BlurView>
+                </View>
+            </View>
 
             {loading && wishlist.length === 0 ? (
-                <View style={styles.listContent}>
-                    <View style={styles.columnWrapper}>
+                <ScrollView
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ paddingHorizontal: 6, paddingTop: 12, paddingBottom: 40 }}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <View style={styles.grid}>
                         {[1, 2, 3, 4, 5, 6].map((i) => (
-                            <ProductSkeleton key={i} width={CARD_WIDTH} style={{ marginBottom: 16 }} />
+                            <View key={i} style={{ width: '50%', paddingHorizontal: 6 }}>
+                                <ProductSkeleton width={CARD_WIDTH} style={{ marginBottom: 12 }} />
+                            </View>
                         ))}
                     </View>
-                </View>
+                </ScrollView>
             ) : (
                 <View style={{ flex: 1, paddingHorizontal: 6 }}>
                     <FlashListOptimized
@@ -164,13 +177,12 @@ export const WishlistScreen = () => {
                             styles.listContent,
                             {
                                 paddingBottom: totalItemsCount > 0 ? 120 : 40,
-                                // paddingTop: insets.top + 60 + 12 // Moved to ListHeaderComponent
                             }
                         ]}
                         renderItem={renderProductCard}
                         showsVerticalScrollIndicator={false}
                         estimatedItemSize={280}
-                        ListHeaderComponent={<View style={{ height: insets.top + 60 + 12 }} />}
+                        ListHeaderComponent={<View style={{ height: 12 }} />}
                         ListEmptyComponent={
                             <Animated.View entering={FadeInUp} style={styles.emptyContainer}>
                                 <Svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="1" opacity={0.5}>
@@ -216,27 +228,41 @@ export const WishlistScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.white,
+        backgroundColor: '#FAFAFA',
     },
     header: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 10,
+        position: 'relative',
         backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        overflow: 'hidden',
     },
     headerContent: {
+        height: 56,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingBottom: 12,
+    },
+    headerTitle: {
+        flex: 1,
+        marginLeft: 12,
     },
     headerBtn: {
         width: 40,
         height: 40,
+        borderRadius: 20,
+        backgroundColor: colors.white,
         alignItems: 'center',
         justifyContent: 'center',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
     },
     loaderContainer: {
         flex: 1,
@@ -249,6 +275,11 @@ const styles = StyleSheet.create({
     },
     columnWrapper: {
         justifyContent: 'space-between',
+    },
+    grid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'flex-start',
     },
     emptyContainer: {
         flex: 1,

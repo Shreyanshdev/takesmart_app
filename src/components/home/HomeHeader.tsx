@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Platform, StatusBar } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Path, Circle, Polyline, Line } from 'react-native-svg';
-import Animated, { useAnimatedStyle, interpolateColor, interpolate, SharedValue, Extrapolation, useDerivedValue } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, interpolateColor, interpolate, SharedValue, Extrapolation, useDerivedValue, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
 import { BlurView } from '@react-native-community/blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -57,23 +57,14 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
         const backgroundColor = interpolateColor(
             scroll.value,
             [0, 1],
-            [colors.primary, colors.white] // Use solid colors for efficient shadow calculation
+            [colors.primary, colors.white]
         );
-        const borderBottomLeftRadius = interpolate(scroll.value, [0, 1], [0, 0]);
-        const borderBottomRightRadius = interpolate(scroll.value, [0, 1], [0, 0]);
 
         return {
             backgroundColor,
-            borderBottomLeftRadius,
-            borderBottomRightRadius,
-            ...(Platform.OS === 'ios' ? {
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: interpolate(scroll.value, [0, 1], [0, 0.1]),
-                shadowRadius: 8,
-            } : {
+            ...(Platform.OS === 'android' ? {
                 elevation: interpolate(scroll.value, [0, 1], [0, 4]),
-            }),
+            } : {}),
         };
     });
 
@@ -119,6 +110,16 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
     // Reanimated doesn't control StatusBar directly. We'll leave it 'light' or set fixed.
     // Given the blue header, 'light-content' (white text) is best initially.
     // When white header, 'dark-content'.
+    const [barStyle, setBarStyle] = useState<'light-content' | 'dark-content'>('light-content');
+
+    useAnimatedReaction(
+        () => scroll.value > 0.5,
+        (isScrolled, previousIsScrolled) => {
+            if (isScrolled !== previousIsScrolled) {
+                runOnJS(setBarStyle)(isScrolled ? 'dark-content' : 'light-content');
+            }
+        }
+    );
 
     // --- Handlers ---
     const handleOpenModal = useCallback(() => setIsModalVisible(true), []);
@@ -166,8 +167,9 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
 
     return (
         <Animated.View style={[styles.container, { paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : insets.top }, containerStyle]}>
-            {/* Glassmorphism Blur Layer */}
-            <Animated.View style={[StyleSheet.absoluteFill, blurStyle]}>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+            {/* Glassmorphism Blur Layer - clipped by overflow:'hidden' on container */}
+            <Animated.View style={[StyleSheet.absoluteFill, blurStyle, { zIndex: 0 }]}>
                 <BlurView
                     style={StyleSheet.absoluteFill}
                     blurType="light"
@@ -221,7 +223,6 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
                 </Animated.View>
 
                 {/* BOTTOM ROW: Search + Wishlist */}
-                {/* This row stays visible and slides up slightly as the top row vanishes */}
                 <View style={styles.bottomRow}>
                     <TouchableOpacity
                         style={styles.searchBar}
@@ -235,14 +236,6 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
                         <MonoText size="m" color={colors.textLight}>Search "Milk"</MonoText>
 
                         <View style={styles.searchRightIcons}>
-                            {/* Mic or Scan icon could go here if needed, keeping simple for now */}
-                            {/* <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <Path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                <Polyline points="14 2 14 8 20 8" />
-                                <Line x1="16" y1="13" x2="8" y2="13" />
-                                <Line x1="16" y1="17" x2="8" y2="17" />
-                                <Polyline points="10 9 9 9 8 9" />
-                            </Svg> */}
                         </View>
                     </TouchableOpacity>
 
@@ -250,7 +243,6 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
                         style={styles.wishlistBtn}
                         onPress={() => navigation.navigate('Wishlist')}
                     >
-                        {/* Wishlist Icon */}
                         <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <Path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
                         </Svg>
@@ -265,7 +257,7 @@ export const HomeHeader = ({ scrollY }: HomeHeaderProps) => {
                 </View>
             </View>
 
-            {/* Address Selection Modal - Kept same */}
+            {/* Address Selection Modal */}
             <AddressSelectionModal
                 visible={isModalVisible}
                 onClose={handleCloseModal}
@@ -287,8 +279,7 @@ const styles = StyleSheet.create({
         right: 0,
         zIndex: 100,
         paddingBottom: 16,
-        overflow: undefined, // Removed overflow:hidden to allow shadow on iOS
-        backgroundColor: colors.white, // Explicit background for shadow efficiency warning
+        overflow: 'hidden', // Clips the BlurView so it doesn't bleed over content below
     },
     content: {
         zIndex: 1,

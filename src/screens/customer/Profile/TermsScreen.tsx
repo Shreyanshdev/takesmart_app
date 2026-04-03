@@ -96,7 +96,7 @@ export const TermsScreen = () => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+            <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
             {/* Header */}
             <View style={[styles.header, { paddingTop: insets.top }]}>

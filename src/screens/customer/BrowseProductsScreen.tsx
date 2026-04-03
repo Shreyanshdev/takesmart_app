@@ -7,7 +7,7 @@ import {
     Image,
     Dimensions,
     StatusBar,
-    ActivityIndicator,
+    ScrollView,
     Platform
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
@@ -23,6 +23,7 @@ import { useCartStore } from '../../store/cart.store';
 import { useBranchStore } from '../../store/branch.store';
 import { ProductDetailsModal } from '../../components/home/ProductDetailsModal';
 import { BrandFooter } from '../../components/shared/BrandFooter';
+import { FloatingCarts } from '../../components/home/FloatingCarts';
 
 import { ProductGridCard } from '../../components/shared/ProductGridCard';
 import { ProductSkeleton } from '../../components/shared/ProductSkeleton';
@@ -31,15 +32,18 @@ const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 36) / 2; // 12 padding on sides + 12 gap = 36
 
 type BrowseRouteParams = {
-    type: 'brand' | 'category';
-    value: string;
+    type: 'brand' | 'category' | 'search' | 'deals' | 'trending' | 'new' | 'none' | string;
+    value?: string;
     categoryId?: string;
+    subCategoryId?: string;
+    title?: string;
 };
 
 export const BrowseProductsScreen = () => {
     const navigation = useNavigation<any>();
     const route = useRoute<RouteProp<{ params: BrowseRouteParams }, 'params'>>();
-    const { type, value, categoryId } = route.params;
+    const ObjectParams = route.params || {};
+    const { type, value, categoryId, subCategoryId, title } = ObjectParams as BrowseRouteParams;
     const insets = useSafeAreaInsets();
 
     // Products state with cursor pagination
@@ -72,12 +76,17 @@ export const BrowseProductsScreen = () => {
         setHasMore(true);
 
         try {
-            // Use optimized feed API for both category and brand browsing
-            const feedData = await productService.getProductsFeed(branchId, {
-                limit: 20,
-                category: type === 'category' ? (categoryId || value) : undefined,
-                brand: type === 'brand' ? value : undefined
-            });
+            // Map the route params to the product API query keys
+            let queryParams: any = { limit: 20 };
+
+            if (type === 'category') queryParams.category = categoryId || value;
+            if (type === 'brand') queryParams.brand = value;
+            if (type === 'search') queryParams.searchQuery = value;
+            if (type === 'deals') queryParams.discountGreaterThan = 1; // Arbitrary 1% minimum for 'deals'
+            if (subCategoryId) queryParams.subcategory = subCategoryId;
+
+            // Use optimized feed API
+            const feedData = await productService.getProductsFeed(branchId, queryParams);
 
             // Products are now pre-flattened from API
             setProducts(feedData.products || []);
@@ -95,12 +104,16 @@ export const BrowseProductsScreen = () => {
 
         setIsLoadingMore(true);
         try {
-            const feedData = await productService.getProductsFeed(branchId, {
-                limit: 20,
-                cursor: nextCursor,
-                category: type === 'category' ? (categoryId || value) : undefined,
-                brand: type === 'brand' ? value : undefined
-            });
+            // Map the route params to the product API query keys
+            let queryParams: any = { limit: 20, cursor: nextCursor };
+
+            if (type === 'category') queryParams.category = categoryId || value;
+            if (type === 'brand') queryParams.brand = value;
+            if (type === 'search') queryParams.searchQuery = value;
+            if (type === 'deals') queryParams.discountGreaterThan = 1;
+            if (subCategoryId) queryParams.subcategory = subCategoryId;
+
+            const feedData = await productService.getProductsFeed(branchId, queryParams);
 
             // Products are pre-flattened from API - append with deduplication safeguard
             setProducts(prev => {
@@ -204,43 +217,48 @@ export const BrowseProductsScreen = () => {
         <View style={styles.container}>
             <StatusBar barStyle="dark-content" />
 
-            {/* Glass Header */}
-            <BlurView blurType="light" blurAmount={20} style={styles.header}>
-                <SafeAreaView edges={['top']} style={styles.headerContent}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
-                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
+            {/* Header — matching OrderHistoryScreen */}
+            <View style={[styles.header, { paddingTop: insets.top }]}>
+                <BlurView
+                    style={StyleSheet.absoluteFill}
+                    blurType="light"
+                    blurAmount={20}
+                    reducedTransparencyFallbackColor="white"
+                />
+                <View style={styles.headerContent}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
                             <Path d="M19 12H5M12 19l-7-7 7-7" />
                         </Svg>
                     </TouchableOpacity>
 
-                    <MonoText size="l" weight="bold" style={{ flex: 1, textAlign: 'center' }}>
-                        {value}
+                    <MonoText size="l" weight="bold" style={styles.headerTitle}>
+                        {title || value || 'Products'}
                     </MonoText>
 
-                    <TouchableOpacity onPress={() => navigation.navigate('Search')} style={styles.headerBtn}>
-                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
+                    <TouchableOpacity onPress={() => navigation.navigate('Search')} style={styles.backBtn}>
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
                             <Path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </Svg>
                     </TouchableOpacity>
-                </SafeAreaView>
-            </BlurView>
+                </View>
+            </View>
 
             {/* Products Grid */}
             {loading ? (
-                <View style={styles.listContent}>
-                    <View style={styles.columnWrapper}>
-                        <ProductSkeleton width={CARD_WIDTH} />
-                        <ProductSkeleton width={CARD_WIDTH} />
+                <ScrollView
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ paddingHorizontal: 6, paddingTop: 12, paddingBottom: 40 }}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                        {[1, 2, 3, 4, 5, 6].map((i) => (
+                            <View key={`skeleton-${i}`} style={{ width: '50%', paddingHorizontal: 6 }}>
+                                <ProductSkeleton width={CARD_WIDTH} />
+                            </View>
+                        ))}
                     </View>
-                    <View style={styles.columnWrapper}>
-                        <ProductSkeleton width={CARD_WIDTH} />
-                        <ProductSkeleton width={CARD_WIDTH} />
-                    </View>
-                    <View style={styles.columnWrapper}>
-                        <ProductSkeleton width={CARD_WIDTH} />
-                        <ProductSkeleton width={CARD_WIDTH} />
-                    </View>
-                </View>
+                </ScrollView>
             ) : !isServiceAvailable ? (
                 <View style={styles.noServiceContainer}>
                     <Svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="1">
@@ -272,7 +290,7 @@ export const BrowseProductsScreen = () => {
                         showsVerticalScrollIndicator={false}
                         estimatedItemSize={280}
                         ListHeaderComponent={() => (
-                            <View style={{ height: insets.top + 60 + 12 }} />
+                            <View style={{ height: 12 }} />
                         )}
                         ListEmptyComponent={() => (
                             <View style={styles.emptyContainer}>
@@ -283,8 +301,11 @@ export const BrowseProductsScreen = () => {
                             <>
                                 {isLoadingMore && (
                                     <View style={styles.loadingMore}>
-                                        <ActivityIndicator size="small" color={colors.primary} />
-                                        <MonoText size="s" color={colors.textLight} style={{ marginLeft: 8 }}>Loading more...</MonoText>
+                                        {[1, 2, 3, 4].map((i) => (
+                                            <View key={`more-${i}`} style={{ width: '50%', paddingHorizontal: 6 }}>
+                                                <ProductSkeleton width={CARD_WIDTH} />
+                                            </View>
+                                        ))}
                                     </View>
                                 )}
                                 <BrandFooter />
@@ -294,31 +315,8 @@ export const BrowseProductsScreen = () => {
                 </View>
             )}
 
-
-            {/* Cart Bar */}
-            {totalItemsCount > 0 && (
-                <View style={[styles.cartBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-                    <View style={styles.cartInfo}>
-                        <MonoText size="s" weight="bold" color={colors.white}>
-                            {totalItemsCount} {totalItemsCount === 1 ? 'item' : 'items'}
-                        </MonoText>
-                        <MonoText size="xs" color="rgba(255,255,255,0.8)">
-                            ₹{cartTotal.toFixed(0)}
-                        </MonoText>
-                    </View>
-                    <TouchableOpacity
-                        style={styles.checkoutBtn}
-                        onPress={() => navigation.navigate('MainTabs', { screen: 'Cart' })}
-                    >
-                        <MonoText size="s" weight="bold" color={colors.primary}>
-                            View Cart
-                        </MonoText>
-                        <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
-                            <Path d="M9 18l6-6-6-6" />
-                        </Svg>
-                    </TouchableOpacity>
-                </View>
-            )}
+            {/* Global Floating Cart */}
+            <FloatingCarts showWithTabBar={false} />
 
             {/* Product Details Modal */}
             <ProductDetailsModal
@@ -338,27 +336,41 @@ export const BrowseProductsScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.white,
+        backgroundColor: '#FAFAFA',
     },
     header: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 10,
+        position: 'relative',
         backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        overflow: 'hidden',
     },
     headerContent: {
+        height: 56,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingBottom: 12,
     },
-    headerBtn: {
+    backBtn: {
         width: 40,
         height: 40,
+        borderRadius: 20,
+        backgroundColor: colors.white,
         alignItems: 'center',
         justifyContent: 'center',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
+    },
+    headerTitle: {
+        flex: 1,
+        marginLeft: 12,
     },
     loaderContainer: {
         flex: 1,
@@ -513,10 +525,8 @@ const styles = StyleSheet.create({
     },
     loadingMore: {
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: spacing.l,
-        marginTop: spacing.m,
+        flexWrap: 'wrap',
+        paddingVertical: spacing.m,
     },
 });
 

@@ -11,7 +11,8 @@ import {
     LayoutAnimation,
     UIManager,
     Platform,
-    ActivityIndicator
+    ActivityIndicator,
+    StatusBar,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Animated, {
@@ -28,7 +29,7 @@ import Svg, { Path, Line, Circle } from 'react-native-svg';
 import { Product, Inventory, InventoryVariant, InventoryPricing, productService } from '../../services/customer/product.service';
 import { useBranchStore } from '../../store/branch.store';
 import { ProductGridCard } from '../shared/ProductGridCard';
-import { ProductSkeleton } from '../shared/ProductSkeleton';
+import { HomeFullSkeleton, ProductStripSkeleton, StripCardSkeleton } from './HomeSkeletons';
 import { SkeletonItem } from '../shared/SkeletonLoader';
 import { reviewService, Review, RatingDistribution } from '../../services/customer/review.service';
 import { useCartStore } from '../../store/cart.store';
@@ -36,6 +37,7 @@ import { useToastStore } from '../../store/toast.store';
 import { useAuthStore } from '../../store/authStore';
 import { useWishlistStore } from '../../store/wishlist.store';
 import { FloatingCarts } from './FloatingCarts';
+import { StripProductCard } from './ProductStrip';
 import { SuccessToast } from '../SuccessToast';
 import { logger } from '../../utils/logger';
 
@@ -136,7 +138,7 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
     const { addToCart, removeFromCart, getItemQuantity } = useCartStore();
     const { showToast } = useToastStore();
     const { currentBranch } = useBranchStore();
-    const { toggleWishlist, isInWishlist } = useWishlistStore();
+    const { toggleWishlist, isInWishlist, wishlist } = useWishlistStore();
     const branchId = currentBranch?._id;
     const heartScale = useSharedValue(1);
 
@@ -145,6 +147,8 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
     }));
 
     const ratingScrollRef = React.useRef<ScrollView>(null);
+    const mainFlatListRef = React.useRef<FlatList>(null);
+    const [isImageViewerVisible, setIsImageViewerVisible] = useState(false);
 
     // Fetch reviews when product changes or filters change (reset pagination)
     useEffect(() => {
@@ -373,8 +377,8 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
 
     // Get variants array (from inventory data) or create default from product
     const variants: VariantItem[] = currentProduct ? ((currentProduct as any).variants?.map((inv: any) => ({
-        _id: inv._id || inv.inventoryId,
-        inventoryId: inv._id || inv.inventoryId,
+        _id: inv.inventoryId || inv._id,
+        inventoryId: inv.inventoryId || inv._id,
         variant: inv.variant,
         pricing: inv.pricing,
         stock: inv.stock,
@@ -512,9 +516,9 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
     };
 
     const renderImageItem = ({ item }: { item: string }) => (
-        <View style={styles.slide}>
+        <TouchableOpacity style={styles.slide} activeOpacity={0.9} onPress={() => setIsImageViewerVisible(true)}>
             <Image source={{ uri: item }} style={styles.image} resizeMode="cover" />
-        </View>
+        </TouchableOpacity>
     );
 
     return (
@@ -526,6 +530,7 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
             statusBarTranslucent={true}
         >
             <View style={styles.overlay}>
+                <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
                 <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1}>
                     <BlurView
                         style={StyleSheet.absoluteFill}
@@ -535,9 +540,9 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                     />
                 </TouchableOpacity>
 
-                <View style={[styles.modalContent, { height: height * 0.9 }]}>
+                <View style={[styles.modalContent, { paddingTop: insets.top }]}>
                     {/* Header Floating Buttons */}
-                    <View style={[styles.headerOverlay, { top: 16 }]}>
+                    <View style={[styles.headerOverlay, { top: insets.top + 8 }]}>
                         <TouchableOpacity style={styles.iconBtn} onPress={onClose}>
                             <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="3">
                                 <Path d="M19 12H5M12 19l-7-7 7-7" />
@@ -567,6 +572,7 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                         {/* Image Carousel */}
                         <View style={styles.sliderContainer}>
                             <FlatList
+                                ref={mainFlatListRef}
                                 data={images}
                                 renderItem={renderImageItem}
                                 horizontal
@@ -590,6 +596,33 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                 </View>
                             )}
                         </View>
+
+                        {/* Thumbnail Selector */}
+                        {images.length > 1 && (
+                            <View style={styles.thumbnailContainer}>
+                                <FlatList
+                                    data={images}
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    contentContainerStyle={styles.thumbnailList}
+                                    keyExtractor={(_, i) => `thumb-${i}`}
+                                    renderItem={({ item, index }) => (
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.thumbnailItem,
+                                                activeSlide === index && styles.activeThumbnailItem
+                                            ]}
+                                            onPress={() => {
+                                                setActiveSlide(index);
+                                                mainFlatListRef.current?.scrollToIndex({ index, animated: true });
+                                            }}
+                                        >
+                                            <Image source={{ uri: item }} style={styles.thumbnailImage} resizeMode="cover" />
+                                        </TouchableOpacity>
+                                    )}
+                                />
+                            </View>
+                        )}
 
                         <View style={styles.bodyContent}>
                             {/* Brand Name */}
@@ -615,15 +648,21 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                 <SkeletonItem width={120} height={16} borderRadius={4} style={{ marginBottom: 12 }} />
                             ) : (
                                 <View style={styles.ratingRowMain}>
-                                    <Svg width="14" height="14" viewBox="0 0 24 24" fill="#FBBF24" stroke="#FBBF24">
-                                        <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
-                                    </Svg>
-                                    <MonoText size="s" weight="bold" style={{ marginLeft: 6 }}>
-                                        {currentProduct.rating?.average || 4.2}
-                                    </MonoText>
-                                    <MonoText size="s" color={colors.textLight} style={{ marginLeft: 8 }}>
-                                        ({currentProduct.rating?.count || 120} reviews)
-                                    </MonoText>
+                                    {currentProduct.rating && currentProduct.rating.count > 0 ? (
+                                        <>
+                                            <Svg width="14" height="14" viewBox="0 0 24 24" fill="#FBBF24" stroke="#FBBF24">
+                                                <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
+                                            </Svg>
+                                            <MonoText size="s" weight="bold" style={{ marginLeft: 6 }}>
+                                                {currentProduct.rating.average.toFixed(1)}
+                                            </MonoText>
+                                            <MonoText size="s" color={colors.textLight} style={{ marginLeft: 8 }}>
+                                                ({currentProduct.rating.count} reviews)
+                                            </MonoText>
+                                        </>
+                                    ) : (
+                                        <MonoText size="s" color={colors.textLight}>no review and rating yet</MonoText>
+                                    )}
                                 </View>
                             )}
 
@@ -731,84 +770,59 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                 </View>
                             )}
 
-                            {/* Related Sections */}
+                            {/* More from this Subcategory */}
                             {(loadingRelated || relatedProducts.length > 0) && (
                                 <View style={styles.suggestSection}>
-                                    <MonoText size="l" weight="bold" style={styles.suggestTitle}>Top products in this category</MonoText>
+                                    <MonoText size="l" weight="bold" style={styles.suggestTitle}>More from this subcategory</MonoText>
                                     {loadingRelated ? (
                                         <FlatList
                                             horizontal
                                             data={[1, 2, 3, 4]}
-                                            keyExtractor={(i) => `cat-skeleton-${i}`}
+                                            keyExtractor={(i) => `related-skeleton-${i}`}
                                             showsHorizontalScrollIndicator={false}
-                                            renderItem={() => <ProductSkeleton width={width * 0.4} />}
+                                            renderItem={() => <StripCardSkeleton />}
                                             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
                                         />
                                     ) : (
                                         <FlatList
                                             horizontal
-                                            data={relatedProducts}
-                                            keyExtractor={(item) => `${item._id}_${item.inventoryId}`}
+                                            data={isLoadingMoreRelated ? [...relatedProducts, ...Array(3).fill({ _skeleton: true })] : relatedProducts}
+                                            keyExtractor={(item, index) => item._skeleton ? `rel-skeleton-${index}` : `rel_${item._id}_${item.inventoryId}`}
                                             showsHorizontalScrollIndicator={false}
-                                            renderItem={({ item }) => {
-                                                // Products now have embedded variant data from API
-                                                const variantData = {
-                                                    _id: item.inventoryId,
-                                                    inventoryId: item.inventoryId,
-                                                    variant: item.variant,
-                                                    pricing: item.pricing,
-                                                    stock: item.stock,
-                                                    isAvailable: item.isAvailable
-                                                };
-                                                const cartItemId = item.inventoryId || item._id;
-
-                                                return (
-                                                    <ProductGridCard
-                                                        product={item}
-                                                        variant={variantData}
-                                                        quantity={getItemQuantity(cartItemId)}
-                                                        width={width * 0.4}
-                                                        onAddToCart={(prod, variant) => {
-                                                            const cid = variant?.inventoryId || variant?._id || prod._id;
-                                                            const productImage = variant?.variant?.images?.[0] || prod.images?.[0] || prod.image;
-                                                            const success = addToCart({
-                                                                ...prod,
-                                                                _id: cid,
-                                                                image: productImage || '',
-                                                                price: variant?.pricing?.mrp || 0,
-                                                                discountPrice: variant?.pricing?.sellingPrice || 0,
-                                                                stock: variant?.stock || 0,
-                                                                quantity: variant?.variant ? {
-                                                                    value: variant.variant.weightValue,
-                                                                    unit: variant.variant.weightUnit
-                                                                } : undefined,
-                                                                formattedQuantity: variant?.variant ? `${variant.variant.weightValue} ${variant.variant.weightUnit}` : undefined
-                                                            } as any);
-                                                            if (!success) {
-                                                                const currentQuantity = getItemQuantity(cid);
-                                                                if (currentQuantity >= (variant?.stock || 0)) {
-                                                                    showToast('Maximum stock limit reached!');
-                                                                } else {
-                                                                    showToast('Product is out of stock!');
-                                                                }
-                                                            }
-                                                        }}
-                                                        onRemoveFromCart={removeFromCart}
-                                                        onPress={(prod, vid) => {
-                                                            setCurrentProduct(prod);
-                                                            setActiveSlide(0);
-                                                        }}
-                                                    />
-                                                );
-                                            }}
+                                            renderItem={({ item }) => item._skeleton ? (
+                                                <StripCardSkeleton />
+                                            ) : (
+                                                <StripProductCard
+                                                    item={item}
+                                                    style={{ width: 135 }}
+                                                    onPress={() => {
+                                                        setCurrentProduct(item);
+                                                        mainFlatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                                                        setActiveSlide(0);
+                                                    }}
+                                                    onAddToCart={() => {
+                                                        const cartItemId = item.inventoryId || item._id;
+                                                        const productImage = item.variant?.images?.[0] || item.images?.[0];
+                                                        addToCart({
+                                                            ...item,
+                                                            _id: cartItemId,
+                                                            name: item.name,
+                                                            image: productImage || '',
+                                                            images: productImage ? [productImage] : (item.images || []),
+                                                            price: item.pricing?.mrp || 0,
+                                                            discountPrice: item.pricing?.sellingPrice || 0,
+                                                            stock: item.stock || 0,
+                                                        } as any);
+                                                    }}
+                                                    onRemoveFromCart={() => {
+                                                        const cartItemId = item.inventoryId || item._id;
+                                                        removeFromCart(cartItemId);
+                                                    }}
+                                                />
+                                            )}
                                             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
                                             onEndReached={loadMoreRelated}
                                             onEndReachedThreshold={0.5}
-                                            ListFooterComponent={() => isLoadingMoreRelated ? (
-                                                <View style={{ flexDirection: 'row', paddingLeft: 12 }}>
-                                                    <ProductSkeleton width={width * 0.4} />
-                                                </View>
-                                            ) : null}
                                         />
                                     )}
                                     {/* See All Button */}
@@ -825,7 +839,7 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                             }}
                                         >
                                             <MonoText size="s" weight="bold" color={colors.primary} style={{ textDecorationLine: 'underline' }}>
-                                                See all products in this category
+                                                View all products in this subcategory
                                             </MonoText>
                                             <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2.5" style={{ marginLeft: 4 }}>
                                                 <Path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
@@ -844,74 +858,49 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                             data={[1, 2, 3, 4]}
                                             keyExtractor={(i) => `brand-skeleton-${i}`}
                                             showsHorizontalScrollIndicator={false}
-                                            renderItem={() => <ProductSkeleton width={width * 0.4} />}
+                                            renderItem={() => <StripCardSkeleton />}
                                             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
                                         />
                                     ) : (
                                         <FlatList
                                             horizontal
-                                            data={brandProducts}
-                                            keyExtractor={(item) => `${item._id}_${item.inventoryId}`}
+                                            data={isLoadingMoreBrand ? [...brandProducts, ...Array(3).fill({ _skeleton: true })] : brandProducts}
+                                            keyExtractor={(item, index) => item._skeleton ? `brand-skeleton-${index}` : `br_${item._id}_${item.inventoryId}`}
                                             showsHorizontalScrollIndicator={false}
-                                            renderItem={({ item }) => {
-                                                // Products now have embedded variant data from API
-                                                const variantData = {
-                                                    _id: item.inventoryId,
-                                                    inventoryId: item.inventoryId,
-                                                    variant: item.variant,
-                                                    pricing: item.pricing,
-                                                    stock: item.stock,
-                                                    isAvailable: item.isAvailable
-                                                };
-                                                const cartItemId = item.inventoryId || item._id;
-
-                                                return (
-                                                    <ProductGridCard
-                                                        product={item}
-                                                        variant={variantData}
-                                                        quantity={getItemQuantity(cartItemId)}
-                                                        width={width * 0.4}
-                                                        onAddToCart={(prod, variant) => {
-                                                            const cid = variant?.inventoryId || variant?._id || prod._id;
-                                                            const productImage = variant?.variant?.images?.[0] || prod.images?.[0] || prod.image;
-                                                            const success = addToCart({
-                                                                ...prod,
-                                                                _id: cid,
-                                                                image: productImage || '',
-                                                                price: variant?.pricing?.mrp || 0,
-                                                                discountPrice: variant?.pricing?.sellingPrice || 0,
-                                                                stock: variant?.stock || 0,
-                                                                quantity: variant?.variant ? {
-                                                                    value: variant.variant.weightValue,
-                                                                    unit: variant.variant.weightUnit
-                                                                } : undefined,
-                                                                formattedQuantity: variant?.variant ? `${variant.variant.weightValue} ${variant.variant.weightUnit}` : undefined
-                                                            } as any);
-                                                            if (!success) {
-                                                                const currentQuantity = getItemQuantity(cid);
-                                                                if (currentQuantity >= (variant?.stock || 0)) {
-                                                                    showToast('Maximum stock limit reached!');
-                                                                } else {
-                                                                    showToast('Product is out of stock!');
-                                                                }
-                                                            }
-                                                        }}
-                                                        onRemoveFromCart={removeFromCart}
-                                                        onPress={(prod, vid) => {
-                                                            setCurrentProduct(prod);
-                                                            setActiveSlide(0);
-                                                        }}
-                                                    />
-                                                );
-                                            }}
+                                            renderItem={({ item }) => item._skeleton ? (
+                                                <StripCardSkeleton />
+                                            ) : (
+                                                <StripProductCard
+                                                    item={item}
+                                                    style={{ width: 135 }}
+                                                    onPress={() => {
+                                                        setCurrentProduct(item);
+                                                        mainFlatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                                                        setActiveSlide(0);
+                                                    }}
+                                                    onAddToCart={() => {
+                                                        const cartItemId = item.inventoryId || item._id;
+                                                        const productImage = item.variant?.images?.[0] || item.images?.[0];
+                                                        addToCart({
+                                                            ...item,
+                                                            _id: cartItemId,
+                                                            name: item.name,
+                                                            image: productImage || '',
+                                                            images: productImage ? [productImage] : (item.images || []),
+                                                            price: item.pricing?.mrp || 0,
+                                                            discountPrice: item.pricing?.sellingPrice || 0,
+                                                            stock: item.stock || 0,
+                                                        } as any);
+                                                    }}
+                                                    onRemoveFromCart={() => {
+                                                        const cartItemId = item.inventoryId || item._id;
+                                                        removeFromCart(cartItemId);
+                                                    }}
+                                                />
+                                            )}
                                             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
                                             onEndReached={loadMoreBrand}
                                             onEndReachedThreshold={0.5}
-                                            ListFooterComponent={() => isLoadingMoreBrand ? (
-                                                <View style={{ flexDirection: 'row', paddingLeft: 12 }}>
-                                                    <ProductSkeleton width={width * 0.4} />
-                                                </View>
-                                            ) : null}
                                         />
                                     )}
                                     {/* See All Button */}
@@ -940,134 +929,89 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                             {/* Reviews Section Restored */}
                             <View style={styles.reviewsSection}>
                                 <View style={styles.reviewsHeader}>
-                                    <MonoText size="l" weight="bold">Product Reviews</MonoText>
-                                    <TouchableOpacity>
-                                        <MonoText size="s" color={colors.primary} weight="bold">Write Review</MonoText>
-                                    </TouchableOpacity>
+                                    <MonoText size="l" weight="bold">Ratings & Reviews</MonoText>
+                                    <MonoText size="xs" color={colors.textLight}>
+                                        {currentProduct.rating?.count || 0} verified ratings
+                                    </MonoText>
                                 </View>
 
-                                {ratingDistribution && (
-                                    <View style={styles.ratingOverview}>
-                                        <View style={{ marginRight: 24, alignItems: 'center' }}>
-                                            <MonoText size="xxxl" weight="bold">{currentProduct.rating?.average || 4.2}</MonoText>
-                                            <View style={{ flexDirection: 'row', gap: 2, marginTop: 4 }}>
-                                                {[1, 2, 3, 4, 5].map(i => (
-                                                    <Svg key={i} width="12" height="12" viewBox="0 0 24 24"
-                                                        fill={i <= Math.round(currentProduct.rating?.average || 4) ? "#FBBF24" : colors.border}>
-                                                        <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
-                                                    </Svg>
-                                                ))}
-                                            </View>
-                                            <MonoText size="xs" color={colors.textLight} style={{ marginTop: 4 }}>Based on {currentProduct.rating?.count || 120} ratings</MonoText>
-                                        </View>
-
-                                        <View style={{ flex: 1 }}>
-                                            {[5, 4, 3, 2, 1].map(rating => {
-                                                const count = (ratingDistribution as any)[rating] || 0;
-                                                const total = (currentProduct.rating?.count || 1);
-                                                const percent = (count / total) * 100;
-                                                return (
-                                                    <View key={rating} style={styles.ratingBar}>
-                                                        <MonoText size="xs" weight="bold" style={{ width: 12 }}>{rating}</MonoText>
-                                                        <View style={styles.ratingBarTrack}>
-                                                            <View style={[styles.ratingBarFill, { width: `${percent}%` }]} />
-                                                        </View>
-                                                        <MonoText size="xs" color={colors.textLight} style={{ width: 30, textAlign: 'right' }}>{count}</MonoText>
-                                                    </View>
-                                                );
-                                            })}
-                                        </View>
-                                    </View>
-                                )}
-
-                                {/* Sort & Filter */}
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={styles.filterContent}>
-                                    <TouchableOpacity
-                                        style={[styles.filterChip, !filterRating && styles.filterChipActive]}
-                                        onPress={() => setFilterRating(null)}
-                                    >
-                                        <MonoText size="xs" color={!filterRating ? colors.white : colors.text} weight="bold">All</MonoText>
-                                    </TouchableOpacity>
-                                    {[5, 4, 3, 2, 1].map(r => (
-                                        <TouchableOpacity
-                                            key={r}
-                                            style={[styles.filterChip, filterRating === r && styles.filterChipActive]}
-                                            onPress={() => setFilterRating(r)}
-                                        >
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                                <MonoText size="xs" color={filterRating === r ? colors.white : colors.text} weight="bold">{r}</MonoText>
-                                                <Svg width="10" height="10" viewBox="0 0 24 24" fill={filterRating === r ? colors.white : "#FBBF24"}>
+                                {/* Compact summary row */}
+                                <View style={styles.simpleRatingRow}>
+                                    {currentProduct.rating && currentProduct.rating.count > 0 ? (
+                                        <>
+                                            <View style={styles.simpleRatingBadge}>
+                                                <MonoText size="l" weight="bold" color={colors.white}>
+                                                    {currentProduct.rating.average.toFixed(1)}
+                                                </MonoText>
+                                                <Svg width="14" height="14" viewBox="0 0 24 24" fill="#FBBF24" style={{ marginLeft: 4 }}>
                                                     <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
                                                 </Svg>
                                             </View>
-                                        </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
+                                            {ratingDistribution && (
+                                                <View style={styles.simpleBarTrack}>
+                                                    <View
+                                                        style={[
+                                                            styles.simpleBarFill,
+                                                            {
+                                                                width: `${((ratingDistribution[5] || 0) + (ratingDistribution[4] || 0)) /
+                                                                    (currentProduct.rating.count || 1) *
+                                                                    100
+                                                                    }%`,
+                                                            },
+                                                        ]}
+                                                    />
+                                                </View>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <MonoText size="s" color={colors.textLight}>no review and rating yet</MonoText>
+                                    )}
+                                </View>
 
+                                {/* Top 1–2 reviews only, simple layout */}
                                 <View style={styles.reviewsList}>
                                     {loadingReviews && reviews.length === 0 ? (
-                                        [1, 2, 3].map(i => (
+                                        [1, 2].map(i => (
                                             <View key={i} style={styles.reviewSkeletonItem}>
-                                                <View style={styles.reviewHeader}>
-                                                    <SkeletonItem width={40} height={40} borderRadius={20} />
-                                                    <View style={{ marginLeft: 12, flex: 1 }}>
-                                                        <SkeletonItem width="40%" height={14} borderRadius={4} style={{ marginBottom: 6 }} />
-                                                        <SkeletonItem width="20%" height={10} borderRadius={4} />
-                                                    </View>
-                                                    <SkeletonItem width={30} height={16} borderRadius={8} />
-                                                </View>
-                                                <SkeletonItem width="100%" height={14} borderRadius={4} style={{ marginTop: 16 }} />
-                                                <SkeletonItem width="80%" height={14} borderRadius={4} style={{ marginTop: 8 }} />
+                                                <SkeletonItem width="60%" height={14} borderRadius={4} style={{ marginBottom: 6 }} />
+                                                <SkeletonItem width="100%" height={12} borderRadius={4} style={{ marginBottom: 4 }} />
+                                                <SkeletonItem width="80%" height={12} borderRadius={4} />
                                             </View>
                                         ))
-                                    ) : reviews.map((review) => {
-                                        const isHelpful = review.helpfulUsers?.includes(currentUserId || '');
-                                        return (
-                                            <View key={review._id} style={styles.reviewItem}>
-                                                <View style={styles.reviewHeader}>
-                                                    <View style={styles.reviewerInfo}>
-                                                        <View style={styles.reviewerAvatar}>
-                                                            <MonoText size="s" weight="bold" color={colors.white}>
-                                                                {review.customer.name.charAt(0).toUpperCase()}
-                                                            </MonoText>
-                                                        </View>
-                                                        <View>
-                                                            <MonoText size="s" weight="bold">{review.customer.name}</MonoText>
-                                                            <MonoText size="xxs" color={colors.textLight}>{new Date(review.createdAt).toLocaleDateString()}</MonoText>
-                                                        </View>
-                                                    </View>
-                                                    <View style={styles.reviewRating}>
-                                                        <MonoText size="xs" weight="bold" color="#F59E0B">{review.rating}</MonoText>
-                                                        <Svg width="12" height="12" viewBox="0 0 24 24" fill="#F59E0B" style={{ marginLeft: 2 }}>
+                                    ) : (
+                                        reviews.slice(0, 2).map((review) => (
+                                            <View key={review._id} style={styles.simpleReviewItem}>
+                                                <View style={styles.simpleReviewHeader}>
+                                                    <MonoText size="s" weight="bold">
+                                                        {review.customer.name}
+                                                    </MonoText>
+                                                    <View style={styles.simpleReviewRating}>
+                                                        <MonoText size="xs" weight="bold" color="#F59E0B">
+                                                            {review.rating}
+                                                        </MonoText>
+                                                        <Svg width="10" height="10" viewBox="0 0 24 24" fill="#F59E0B" style={{ marginLeft: 2 }}>
                                                             <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z" />
                                                         </Svg>
                                                     </View>
                                                 </View>
                                                 {review.comment && (
-                                                    <MonoText size="s" color={colors.text} style={{ marginTop: 12, lineHeight: 20 }}>
+                                                    <MonoText size="s" color={colors.text} style={{ marginTop: 6, lineHeight: 18 }} numberOfLines={3}>
                                                         {review.comment}
                                                     </MonoText>
                                                 )}
-                                                <TouchableOpacity
-                                                    style={styles.helpfulBtn}
-                                                    onPress={() => handleMarkHelpful(review._id)}
-                                                    disabled={!currentUserId || (typeof review.customer === 'string' ? review.customer : review.customer?._id) === currentUserId}
-                                                >
-                                                    <Svg width="16" height="16" viewBox="0 0 24 24" fill={isHelpful ? colors.accent : "none"} stroke={isHelpful ? colors.accent : colors.textLight} strokeWidth="2">
-                                                        <Path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                                                    </Svg>
-                                                    <MonoText size="xs" weight="bold" color={isHelpful ? colors.accent : colors.textLight} style={{ marginLeft: 6 }}>
-                                                        {review.helpfulCount > 0 ? `${review.helpfulCount} helpful` : 'Helpful'}
-                                                    </MonoText>
-                                                </TouchableOpacity>
                                             </View>
-                                        );
-                                    })}
+                                        ))
+                                    )}
 
-                                    {hasMoreReviews && (
-                                        <TouchableOpacity style={styles.showMoreBtn} onPress={loadMoreReviews} disabled={loadingReviews}>
+                                    {reviews.length > 2 && (
+                                        <TouchableOpacity
+                                            style={styles.showMoreBtn}
+                                            onPress={() => {
+                                                navigation.navigate('ProductReviews', { productId: currentProduct._id });
+                                            }}
+                                        >
                                             <MonoText size="s" weight="bold" color={colors.accent}>
-                                                {loadingReviews ? 'Loading...' : 'Show more reviews'}
+                                                View all reviews
                                             </MonoText>
                                         </TouchableOpacity>
                                     )}
@@ -1150,6 +1094,42 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
             </View>
             {/* Toast rendered inside modal to appear above modal layer */}
             <SuccessToast />
+
+            {/* Fullscreen image viewer with simple pinch-zoom using ScrollView */}
+            <Modal
+                visible={isImageViewerVisible}
+                transparent
+                animationType="fade"
+                statusBarTranslucent
+                onRequestClose={() => setIsImageViewerVisible(false)}
+            >
+                <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+                <View style={styles.viewerOverlay}>
+                    <TouchableOpacity style={styles.viewerBackdrop} activeOpacity={1} onPress={() => setIsImageViewerVisible(false)} />
+                    <View style={styles.viewerContent}>
+                        <ScrollView
+                            style={{ flex: 1 }}
+                            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}
+                            maximumZoomScale={3}
+                            minimumZoomScale={1}
+                            bouncesZoom
+                            centerContent
+                        >
+                            <Image
+                                source={{ uri: images[activeSlide] || images[0] }}
+                                style={styles.viewerImage}
+                                resizeMode="contain"
+                            />
+                        </ScrollView>
+                        <TouchableOpacity style={styles.viewerCloseBtn} onPress={() => setIsImageViewerVisible(false)}>
+                            <Svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={colors.white} strokeWidth="2">
+                                <Line x1="18" y1="6" x2="6" y2="18" />
+                                <Line x1="6" y1="6" x2="18" y2="18" />
+                            </Svg>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </Modal >
     );
 };
@@ -1157,28 +1137,23 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        justifyContent: 'flex-end',
-    },
-    soldOutButton: {
-        backgroundColor: colors.border,
-        borderColor: colors.border,
     },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
     },
     modalContent: {
+        flex: 1,
         backgroundColor: colors.white,
-        borderTopLeftRadius: 32,
-        borderTopRightRadius: 32,
         overflow: 'hidden',
     },
     headerOverlay: {
         position: 'absolute',
-        left: 20,
-        right: 20,
+        left: 0,
+        right: 0,
         flexDirection: 'row',
         justifyContent: 'space-between',
-        zIndex: 10,
+        paddingHorizontal: 16,
+        zIndex: 100,
     },
     headerRightActions: {
         flexDirection: 'row',
@@ -1189,7 +1164,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: colors.white, 
+        backgroundColor: colors.white,
         justifyContent: 'center',
         alignItems: 'center',
         ...Platform.select({
@@ -1256,9 +1231,10 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     productName: {
-        fontSize: 22,
-        lineHeight: 28,
+        fontSize: 24,
+        lineHeight: 30,
         color: colors.black,
+        marginTop: 4,
     },
     variantContainer: {
         marginTop: 24,
@@ -1268,6 +1244,7 @@ const styles = StyleSheet.create({
     },
     variantScroll: {
         paddingRight: 20,
+        paddingVertical: 8, // Allow shadow space
     },
     newVariantCard: {
         width: 140,
@@ -1333,10 +1310,11 @@ const styles = StyleSheet.create({
         lineHeight: 20,
     },
     suggestSection: {
-        marginTop: 32,
+        marginTop: 40,
     },
     suggestTitle: {
-        marginBottom: 16,
+        marginBottom: 20,
+        paddingHorizontal: 0,
     },
     // Removed floatingCartWrapper as FloatingCarts manages its own absolute position
     bottomBar: {
@@ -1534,6 +1512,106 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         marginTop: 12,
         paddingVertical: 8,
+    },
+    simpleRatingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
+        marginBottom: 12,
+        paddingVertical: 8,
+    },
+    simpleRatingBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+        backgroundColor: colors.primary,
+        marginRight: 12,
+    },
+    simpleBarTrack: {
+        flex: 1,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#E5E7EB',
+        overflow: 'hidden',
+    },
+    simpleBarFill: {
+        height: '100%',
+        borderRadius: 3,
+        backgroundColor: '#22C55E',
+    },
+    simpleReviewItem: {
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F3F4F6',
+    },
+    simpleReviewHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    simpleReviewRating: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 6,
+        backgroundColor: '#FEF3C7',
+    },
+    viewerOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.85)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    viewerBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    viewerContent: {
+        width,
+        height,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    viewerImage: {
+        width: width * 0.9,
+        height: height * 0.8,
+    },
+    viewerCloseBtn: {
+        position: 'absolute',
+        top: 40,
+        right: 24,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    thumbnailContainer: {
+        marginTop: 12,
+        paddingHorizontal: 20,
+    },
+    thumbnailList: {
+        gap: 12,
+        paddingRight: 20,
+        paddingBottom: 4,
+    },
+    thumbnailItem: {
+        width: 60,
+        height: 60,
+        borderRadius: 8,
+        borderWidth: 2,
+        borderColor: '#E5E7EB',
+        overflow: 'hidden',
+    },
+    activeThumbnailItem: {
+        borderColor: colors.accent,
+    },
+    thumbnailImage: {
+        width: '100%',
+        height: '100%',
     },
 });
 

@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { ErrorBoundary } from './src/components/shared/ErrorBoundary';
@@ -24,6 +25,7 @@ configurePushNotifications((data) => {
 const App = () => {
   return (
     <SafeAreaProvider>
+      <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
       <ErrorBoundary>
         <SocketListener />
         <RootNavigator />

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import GetLocation from 'react-native-get-location';
 import { BlurView } from '@react-native-community/blur';
+import { StatusBar } from 'react-native';
 import Modal from 'react-native-modal';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -464,6 +465,7 @@ export const PartnerOrderTrackingScreen = () => {
 
     return (
         <View style={styles.container}>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
             {/* Header */}
             <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>

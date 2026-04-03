@@ -40,7 +40,7 @@ export const useWishlistStore = create<WishlistState>()(
                 if (isFavorite) {
                     get().removeFromWishlist(itemId);
                 } else {
-                    get().addToWishlist(product);
+                    get().addToWishlist({ ...product, inventoryId: inventoryId || product.inventoryId });
                 }
 
                 try {

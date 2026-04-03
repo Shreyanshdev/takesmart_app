@@ -1,17 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Background Gradient: Whitish to Yellowish -->
+    <!-- Solid brand orange background (#FF4700) -->
     <item>
         <shape android:shape="rectangle">
-            <gradient
-                android:startColor="#FFFFFF"
-                android:endColor="#FFFDD0"
-                android:angle="270"
-                android:type="linear" />
+            <solid android:color="#FF4700" />
         </shape>
     </item>
-    
-    <!-- Centered Logo -->
+
+    <!-- Food icon pattern background (tiled) -->
+    <item>
+        <bitmap
+            android:src="@drawable/splash_bg"
+            android:tileMode="repeat"
+            android:alpha="0.08"
+            android:gravity="fill" />
+    </item>
+
+    <!-- Centered Logo (properly sized) -->
     <item>
         <bitmap
             android:src="@drawable/splash_logo"

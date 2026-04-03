@@ -1,6 +1,18 @@
 import React, { useState, useRef } from 'react';
-import { View, StyleSheet, Image, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Alert, Dimensions } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+    View,
+    StyleSheet,
+    Image,
+    TextInput,
+    TouchableOpacity,
+    ScrollView,
+    KeyboardAvoidingView,
+    Platform,
+    Alert,
+    Dimensions,
+    StatusBar
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { BlurView } from '@react-native-community/blur';
 import LinearGradient from 'react-native-linear-gradient';
@@ -11,16 +23,16 @@ import { MonoText } from '../../components/shared/MonoText';
 import { authService } from '../../services/auth/auth.service';
 import { logger } from '../../utils/logger';
 
-const { width, height } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export const CustomerLoginScreen = () => {
     const navigation = useNavigation<any>();
+    const insets = useSafeAreaInsets();
     const [phoneNumber, setPhoneNumber] = useState('');
     const [loading, setLoading] = useState(false);
     const inputRef = useRef<TextInput | null>(null);
 
     const handlePhoneChange = (text: string) => {
-        // Only allow digits and max 10 characters
         const cleaned = text.replace(/[^0-9]/g, '').slice(0, 10);
         setPhoneNumber(cleaned);
     };
@@ -49,127 +61,131 @@ export const CustomerLoginScreen = () => {
 
     return (
         <View style={styles.container}>
-            {/* Gradient Background */}
+
+            {/* Background Layer - Branded Theme */}
             <LinearGradient
-                colors={['#FFF8F0', '#FFFDD0', '#FFF5E6']}
-                style={styles.gradient}
+                colors={['#DEFCE1', '#FFFFFF']}
+                style={StyleSheet.absoluteFill}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+                end={{ x: 0, y: 0.6 }}
             />
+            <View style={styles.patternContainer}>
+                <Image
+                    source={require('../../assets/loadscreen/bgimage.jpg')}
+                    style={[styles.patternImage, { opacity: 0.1 }]}
+                    resizeMode="repeat"
+                />
+                <LinearGradient
+                    colors={['rgba(255,255,255,0)', '#FFFFFF']}
+                    style={StyleSheet.absoluteFill}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 0.45 }}
+                />
+            </View>
 
-            {/* Decorative Blur Circles */}
-            <View style={[styles.blurCircle, styles.blurCircle1]} />
-            <View style={[styles.blurCircle, styles.blurCircle2]} />
-
-
-            <SafeAreaView style={styles.safeArea}>
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={styles.keyboardView}
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={styles.keyboardView}
+            >
+                <ScrollView
+                    contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + spacing.m }]}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
                 >
-                    <ScrollView
-                        contentContainerStyle={styles.scrollContent}
-                        showsVerticalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled"
-                    >
-                        <View style={styles.contentContainer}>
-                            {/* Customer Badge */}
-                            <View style={styles.customerBadge}>
-                                <MonoText size="xs" weight="bold" color={colors.primary}>
-                                    LOG IN
-                                </MonoText>
-                            </View>
+                    {/* Header Logo */}
+                    <View style={styles.header}>
+                        <Image
+                            source={require('../../assets/login/logo.png')}
+                            style={styles.logo}
+                            resizeMode="contain"
+                        />
+                    </View>
 
-                            {/* Welcome Section */}
-                            <View style={styles.welcomeSection}>
-                                <MonoText size="xxl" weight="bold" color={colors.text} style={styles.welcomeTitle}>
-                                    Order groceries{'\n'}in minutes
-                                </MonoText>
-                                <MonoText size="s" color={colors.textLight} style={styles.welcomeSubtitle}>
-                                    Login/Sign up to place your order
-                                </MonoText>
-                            </View>
-
-                            {/* Phone Input Section */}
-                            <View style={styles.inputSection}>
-                                <View style={styles.phoneInputContainer}>
-                                    <MonoText size="xs" weight="bold" color={colors.textLight} style={styles.phoneLabel}>
-                                        MOBILE NUMBER
-                                    </MonoText>
-                                    <View style={styles.inputWrapper}>
-                                        <View style={styles.countryCode}>
-                                            <MonoText style={styles.flagText}>🇮🇳</MonoText>
-                                            <MonoText weight="bold" color={colors.text}>+91</MonoText>
-                                        </View>
-                                        <TextInput
-                                            ref={inputRef}
-                                            style={styles.phoneInput}
-                                            value={phoneNumber}
-                                            onChangeText={handlePhoneChange}
-                                            placeholder="00000 00000"
-                                            placeholderTextColor="#D1D5DB"
-                                            keyboardType="number-pad"
-                                            maxLength={10}
-                                        />
-                                        {phoneNumber.length === 10 && (
-                                            <View style={styles.validIcon}>
-                                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                                                    <Circle cx="12" cy="12" r="10" fill={colors.success} />
-                                                    <Path d="M8 12l2.5 2.5L16 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                                </Svg>
-                                            </View>
-                                        )}
-                                    </View>
-                                </View>
-
-                                {/* Continue/Send OTP Button - Glass Style */}
-                                <TouchableOpacity
-                                    style={styles.continueBtn}
-                                    onPress={() => handleSendOtp().catch(() => Alert.alert('Error', 'Failed to send OTP'))}
-                                    disabled={!isPhoneValid || loading}
-                                    activeOpacity={0.8}
-                                >
-                                    <BlurView
-                                        style={StyleSheet.absoluteFill}
-                                        blurType="light"
-                                        blurAmount={15}
-                                        reducedTransparencyFallbackColor="white"
-                                    />
-                                    <LinearGradient
-                                        colors={['rgba(255, 71, 0, 0.1)', 'rgba(255, 71, 0, 0.05)']}
-                                        style={styles.buttonGradient}
-                                    >
-                                        <MonoText weight="bold" color={colors.primary} size="m">
-                                            {loading ? 'Sending OTP...' : 'Continue'}
-                                        </MonoText>
-                                        {!loading && (
-                                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ marginLeft: 8 }}>
-                                                <Path d="M5 12h14M12 5l7 7-7 7" stroke={colors.primary} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                                            </Svg>
-                                        )}
-                                    </LinearGradient>
-                                </TouchableOpacity>
-                            </View>
-
-                            {/* Delivery Partner Link */}
-                            <View style={styles.partnerSection}>
-                                <TouchableOpacity
-                                    style={styles.partnerLink}
-                                    onPress={() => navigation.navigate('PartnerLogin')}
-                                    activeOpacity={0.7}
-                                >
-                                    <MonoText size="s" color={colors.textLight}>
-                                        Are you a delivery partner?{' '}
-                                    </MonoText>
-                                    <MonoText size="s" color={colors.primary} weight="bold">
-                                        Login Here
-                                    </MonoText>
-                                </TouchableOpacity>
-                            </View>
+                    <View style={styles.contentContainer}>
+                        {/* Welcome Section */}
+                        <View style={styles.welcomeSection}>
+                            <MonoText style={styles.welcomeTitle}>
+                                Fresh Groceries{'\n'}in Minutes
+                            </MonoText>
+                            <MonoText style={styles.welcomeSubtitle}>
+                                Enter your mobile number to proceed
+                            </MonoText>
                         </View>
-                    </ScrollView>
-                </KeyboardAvoidingView>
-            </SafeAreaView>
+
+                        {/* Phone Input Section */}
+                        <View style={styles.inputSection}>
+                            <View style={styles.inputWrapper}>
+                                <View style={styles.countryCode}>
+                                    <MonoText style={styles.flagText}>🇮🇳</MonoText>
+                                    <MonoText weight="bold" color={colors.text}>+91</MonoText>
+                                </View>
+                                <TextInput
+                                    ref={inputRef}
+                                    style={styles.phoneInput}
+                                    value={phoneNumber}
+                                    onChangeText={handlePhoneChange}
+                                    placeholder="00000 00000"
+                                    placeholderTextColor="#D1D5DB"
+                                    keyboardType="number-pad"
+                                    maxLength={10}
+                                />
+                                {phoneNumber.length === 10 && (
+                                    <View style={styles.validIcon}>
+                                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                            <Circle cx="12" cy="12" r="10" fill={colors.success} />
+                                            <Path d="M8 12l2.5 2.5L16 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                        </Svg>
+                                    </View>
+                                )}
+                            </View>
+
+                            {/* Continue Button - Glass Style */}
+                            <TouchableOpacity
+                                style={[styles.continueBtn, !isPhoneValid && styles.disabledBtn]}
+                                onPress={() => handleSendOtp()}
+                                disabled={!isPhoneValid || loading}
+                                activeOpacity={0.8}
+                            >
+                                <BlurView
+                                    style={StyleSheet.absoluteFill}
+                                    blurType="light"
+                                    blurAmount={15}
+                                    reducedTransparencyFallbackColor="white"
+                                />
+                                <LinearGradient
+                                    colors={['rgba(255, 71, 0, 0.1)', 'rgba(255, 71, 0, 0.05)']}
+                                    style={styles.buttonGradient}
+                                >
+                                    <MonoText weight="bold" color={colors.primary} size="m">
+                                        {loading ? 'Sending OTP...' : 'Send OTP'}
+                                    </MonoText>
+                                    {!loading && (
+                                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ marginLeft: 8 }}>
+                                            <Path d="M5 12h14M12 5l7 7-7 7" stroke={colors.primary} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                                        </Svg>
+                                    )}
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Footer Section */}
+                        <View style={styles.footer}>
+                            <TouchableOpacity
+                                style={styles.partnerLink}
+                                onPress={() => navigation.navigate('PartnerLogin')}
+                                activeOpacity={0.7}
+                            >
+                                <MonoText size="s" color={colors.textLight}>
+                                    Are you a delivery partner?{' '}
+                                </MonoText>
+                                <MonoText size="s" color={colors.primary} weight="bold">
+                                    Login Here
+                                </MonoText>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </View>
     );
 };
@@ -177,81 +193,59 @@ export const CustomerLoginScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.secondary,
+        backgroundColor: colors.white,
     },
-    gradient: {
+    patternContainer: {
         ...StyleSheet.absoluteFillObject,
+        overflow: 'hidden',
     },
-    safeArea: {
-        flex: 1,
+    patternImage: {
+        width: '100%',
+        height: '100%',
+        transform: [{ scale: 3 }],
     },
     keyboardView: {
         flex: 1,
     },
     scrollContent: {
         flexGrow: 1,
-        justifyContent: 'center',
-        padding: spacing.xl,
+        paddingHorizontal: spacing.xl,
+        justifyContent: 'center', // Center vertically
     },
-    // Decorative blur circles
-    blurCircle: {
-        position: 'absolute',
-        borderRadius: 999,
+    header: {
+        marginTop: 2,
+        marginBottom: 110,
+        alignItems: 'center',
+        transform: [{ scale: 3 }]
     },
-    blurCircle1: {
-        width: 300,
-        height: 300,
-        backgroundColor: `${colors.primary}15`,
-        top: -100,
-        right: -50,
+    logo: {
+        width: 160,
+        height: 60,
     },
-    blurCircle2: {
-        width: 200,
-        height: 200,
-        backgroundColor: '#FF6B2B10',
-        bottom: 50,
-        left: -50,
-    },
-    // Content Layout
     contentContainer: {
-        marginTop: spacing.xl,
+        width: '100%',
     },
-    // Customer Badge
-    customerBadge: {
-        alignSelf: 'flex-start',
-        backgroundColor: 'rgba(255,255,255,0.8)',
-        paddingHorizontal: spacing.m,
-        paddingVertical: spacing.xs,
-        borderRadius: 20,
-        marginBottom: spacing.l,
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.05)',
-    },
-    // Welcome
     welcomeSection: {
         marginBottom: 40,
+        alignItems: 'center', // Center content horizontally
     },
     welcomeTitle: {
-        fontSize: 36,
-        lineHeight: 44,
-        letterSpacing: -0.5,
+        fontSize: 32,
+        lineHeight: 40,
+        fontWeight: '900',
+        color: '#1A1A1A',
         marginBottom: spacing.s,
+        textAlign: 'center', // Center text
     },
     welcomeSubtitle: {
         fontSize: 16,
         lineHeight: 24,
+        color: '#666666',
+        textAlign: 'center', // Center text
     },
-    // Input Section
     inputSection: {
         marginBottom: spacing.xl,
-    },
-    phoneInputContainer: {
-        marginBottom: spacing.l,
-    },
-    phoneLabel: {
-        marginBottom: spacing.m,
-        marginLeft: spacing.xs,
-        letterSpacing: 0.5,
+        width: '100%',
     },
     inputWrapper: {
         flexDirection: 'row',
@@ -262,6 +256,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.m,
         borderWidth: 1,
         borderColor: 'rgba(0,0,0,0.06)',
+        marginBottom: spacing.l,
         ...Platform.select({
             ios: {
                 shadowColor: '#000',
@@ -297,14 +292,16 @@ const styles = StyleSheet.create({
     validIcon: {
         marginLeft: spacing.s,
     },
-    // Liquid Button
     continueBtn: {
-        height: 60,
-        borderRadius: 20,
+        height: 56,
+        borderRadius: 28,
         overflow: 'hidden',
-        marginTop: spacing.xl,
         borderWidth: 1,
         borderColor: 'rgba(255, 71, 0, 0.2)',
+    },
+    disabledBtn: {
+        opacity: 0.5,
+        borderColor: 'rgba(0,0,0,0.1)',
     },
     buttonGradient: {
         flex: 1,
@@ -313,22 +310,15 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingHorizontal: 20,
     },
-    buttonGloss: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: '50%',
-        backgroundColor: 'rgba(255,255,255,0.15)',
-    },
-    // Partner Section
-    partnerSection: {
-        marginTop: spacing.xl,
+    footer: {
+        marginTop: 40,
         alignItems: 'center',
+        paddingBottom: spacing.xl,
     },
     partnerLink: {
-        padding: spacing.s,
         flexDirection: 'row',
         alignItems: 'center',
+        padding: spacing.s,
     },
 });
+

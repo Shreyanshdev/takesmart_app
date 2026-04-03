@@ -299,117 +299,72 @@ export const SearchScreen = () => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
-            {/* Glass Header - View on Android for better visibility/performance */}
-            {Platform.OS === 'ios' ? (
-                <BlurView blurType="light" blurAmount={20} style={[styles.header, { paddingTop: insets.top }]}>
-                    <View style={styles.headerContent}>
-                        {/* Back Button */}
-                        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
-                            <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
-                                <Path d="M19 12H5M12 19l-7-7 7-7" />
-                            </Svg>
-                        </TouchableOpacity>
+            {/* Header — matching OrderHistoryScreen / BrowseProductsScreen */}
+            <View style={[styles.header, { paddingTop: insets.top }]}>
+                {Platform.OS === 'ios' && (
+                    <BlurView
+                        style={StyleSheet.absoluteFill}
+                        blurType="light"
+                        blurAmount={20}
+                        reducedTransparencyFallbackColor="white"
+                    />
+                )}
+                <View style={styles.headerContent}>
+                    {/* Back Button */}
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
+                            <Path d="M19 12H5M12 19l-7-7 7-7" />
+                        </Svg>
+                    </TouchableOpacity>
 
-                        {/* Search Input - Always visible on search screen */}
-                        <View style={styles.searchContainer}>
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                                <Circle cx="11" cy="11" r="8" />
-                                <Path d="M21 21l-4.35-4.35" />
-                            </Svg>
-                            <TextInput
-                                ref={inputRef}
-                                style={styles.searchInput}
-                                placeholder="Search for products..."
-                                placeholderTextColor={colors.textLight}
-                                value={query}
-                                onChangeText={(text) => {
-                                    setQuery(text);
-                                    setShowResults(false);
-                                }}
-                                onSubmitEditing={handleSearchSubmit}
-                                returnKeyType="search"
-                                autoCapitalize="none"
-                                autoFocus={true}
-                            />
-                            {query.length > 0 && (
-                                <TouchableOpacity onPress={clearSearch} style={styles.clearBtn}>
-                                    <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                                        <Path d="M18 6L6 18M6 6l12 12" />
-                                    </Svg>
-                                </TouchableOpacity>
-                            )}
-                        </View>
+                    {/* Search Input */}
+                    <View style={styles.searchContainer}>
+                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                            <Circle cx="11" cy="11" r="8" />
+                            <Path d="M21 21l-4.35-4.35" />
+                        </Svg>
+                        <TextInput
+                            ref={inputRef}
+                            style={styles.searchInput}
+                            placeholder="Search for products..."
+                            placeholderTextColor={colors.textLight}
+                            value={query}
+                            onChangeText={(text) => {
+                                setQuery(text);
+                                setShowResults(false);
+                            }}
+                            onSubmitEditing={handleSearchSubmit}
+                            returnKeyType="search"
+                            autoCapitalize="none"
+                            autoFocus={true}
+                        />
+                        {query.length > 0 && (
+                            <TouchableOpacity onPress={clearSearch} style={styles.clearBtn}>
+                                <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                                    <Path d="M18 6L6 18M6 6l12 12" />
+                                </Svg>
+                            </TouchableOpacity>
+                        )}
                     </View>
-
-                    {/* Results Count */}
-                    {showResults && filteredProducts.length > 0 && (
-                        <View style={styles.resultsHeader}>
-                            <MonoText size="s" color={colors.textLight}>
-                                {filteredProducts.length} result{filteredProducts.length !== 1 ? 's' : ''} found
-                            </MonoText>
-                        </View>
-                    )}
-                </BlurView>
-            ) : (
-                <View style={[styles.header, { paddingTop: insets.top }]}>
-                    <View style={styles.headerContent}>
-                        {/* Back Button */}
-                        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
-                            <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
-                                <Path d="M19 12H5M12 19l-7-7 7-7" />
-                            </Svg>
-                        </TouchableOpacity>
-
-                        {/* Search Input - Always visible on search screen */}
-                        <View style={styles.searchContainer}>
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                                <Circle cx="11" cy="11" r="8" />
-                                <Path d="M21 21l-4.35-4.35" />
-                            </Svg>
-                            <TextInput
-                                ref={inputRef}
-                                style={styles.searchInput}
-                                placeholder="Search for products..."
-                                placeholderTextColor={colors.textLight}
-                                value={query}
-                                onChangeText={(text) => {
-                                    setQuery(text);
-                                    setShowResults(false);
-                                }}
-                                onSubmitEditing={handleSearchSubmit}
-                                returnKeyType="search"
-                                autoCapitalize="none"
-                                autoFocus={true}
-                            />
-                            {query.length > 0 && (
-                                <TouchableOpacity onPress={clearSearch} style={styles.clearBtn}>
-                                    <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                                        <Path d="M18 6L6 18M6 6l12 12" />
-                                    </Svg>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                    </View>
-
-                    {/* Results Count */}
-                    {showResults && filteredProducts.length > 0 && (
-                        <View style={styles.resultsHeader}>
-                            <MonoText size="s" color={colors.textLight}>
-                                {filteredProducts.length} result{filteredProducts.length !== 1 ? 's' : ''} found
-                            </MonoText>
-                        </View>
-                    )}
                 </View>
-            )}
+
+                {/* Results Count */}
+                {showResults && filteredProducts.length > 0 && (
+                    <View style={styles.resultsHeader}>
+                        <MonoText size="s" color={colors.textLight}>
+                            {filteredProducts.length} result{filteredProducts.length !== 1 ? 's' : ''} found
+                        </MonoText>
+                    </View>
+                )}
+            </View>
 
             {/* Content */}
             <TouchableOpacity activeOpacity={1} style={{ flex: 1 }} onPress={() => inputRef.current?.blur()}>
                 <FlatList
                     data={[]}
                     renderItem={null}
-                    contentContainerStyle={[styles.content, { paddingTop: insets.top + 80 }]}
+                    contentContainerStyle={styles.content}
                     ListHeaderComponent={
                         <View>
                             {!query ? renderInitialState() : (showResults ? renderResults() : renderSuggestions())}
@@ -435,15 +390,12 @@ export const SearchScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.white,
+        backgroundColor: '#FAFAFA',
     },
     header: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 10,
+        position: 'relative',
         backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        overflow: 'hidden',
         ...Platform.select({
             android: {
                 elevation: 4,
@@ -451,10 +403,10 @@ const styles = StyleSheet.create({
         }),
     },
     headerContent: {
+        height: 56,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingBottom: 12,
     },
     headerBtn: {
         width: 40,

@@ -1,13 +1,18 @@
 <resources>
 
-    <!-- Base application theme. -->
+    <!-- Base application theme (used after splash is dismissed) -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
         <!-- Make navigation bar (gesture area) black -->
         <item name="android:navigationBarColor">#000000</item>
-        <!-- Splash Screen Background -->
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+
+    <!-- Boot splash theme: shown during cold start on pre-Android 12 (WHITE) -->
+    <style name="BootTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:navigationBarColor">#000000</item>
     </style>
 
 </resources>

@@ -9,14 +9,18 @@ import {
     StatusBar,
     NativeSyntheticEvent,
     NativeScrollEvent,
+    Image,
+    SafeAreaView
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { SvgXml } from 'react-native-svg';
+import LinearGradient from 'react-native-linear-gradient';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../../components/shared/MonoText';
-import { onboardingImages } from './OnboardingImages';
+import { GroceriesSvg } from '../../components/onboarding/svg/GroceriesSvg';
+import { TakeawaySvg } from '../../components/onboarding/svg/TakeawaySvg';
+import { Groceries2Svg } from '../../components/onboarding/svg/Groceries2Svg';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -24,34 +28,38 @@ interface OnboardingSlide {
     id: string;
     title: string;
     description: string;
-    imageXml: string;
+    image: any;
+    ImageComponent: React.FC<{ width: number | string; height: number | string }>;
 }
 
 const slides: OnboardingSlide[] = [
     {
         id: '1',
-        title: 'Need Groceries Now?',
-        description: 'Select wide range of products from fresh fruits to delicious snacks',
-        imageXml: onboardingImages.image1,
+        title: 'Fresh Groceries for Every Home',
+        description: 'Fresh vegetables, fruits, and daily grocery essentials carefully selected for your home.',
+        image: require('../../assets/loadscreen/groceries.png'),
+        ImageComponent: GroceriesSvg,
     },
     {
         id: '2',
-        title: 'Farm Fresh Quality',
-        description: 'We source directly from farmers to ensure the best quality for your family',
-        imageXml: onboardingImages.image2,
+        title: 'Groceries Delivered to Your Door Anytime',
+        description: 'Order your daily essentials whenever you need and enjoy fast and reliable home delivery.',
+        image: require('../../assets/loadscreen/takeaway.png'),
+        ImageComponent: TakeawaySvg,
     },
     {
         id: '3',
-        title: 'Great Deals & Offers',
-        description: 'Save big on your daily essentials with our unbeatable prices and seasonal discounts',
-        imageXml: onboardingImages.image3,
+        title: 'Farm Fresh Quality at Your Convenience',
+        description: 'We source directly from farmers to ensure the best quality for your family.',
+        image: require('../../assets/loadscreen/groceries2.png'),
+        ImageComponent: Groceries2Svg,
     },
-    {
-        id: '4',
-        title: 'Lightning Fast Delivery',
-        description: 'Get your order delivered to your doorstep in minutes, live track your delivery',
-        imageXml: onboardingImages.image4,
-    },
+];
+
+const GRADIENTS = [
+    ['#DEFCE1', '#FFFFFF'], // Step 1: Green
+    ['#FFE6D9', '#FFFFFF'], // Step 2: Orange/Peach
+    ['#DEFCE1', '#FFFFFF'], // Step 3: Green
 ];
 
 export const OnboardingScreen = () => {
@@ -78,16 +86,25 @@ export const OnboardingScreen = () => {
     };
 
     const renderSlide = ({ item }: { item: OnboardingSlide }) => {
+        const ImageComponent = item.ImageComponent;
         return (
             <View style={styles.slide}>
                 <View style={styles.imageContainer}>
-                    <SvgXml xml={item.imageXml} width={SCREEN_WIDTH * 0.8} height={SCREEN_WIDTH * 0.8} />
+                    {ImageComponent ? (
+                        <ImageComponent width="100%" height="100%" />
+                    ) : (
+                        <Image
+                            source={item.image}
+                            style={styles.mainImage}
+                            resizeMode="contain"
+                        />
+                    )}
                 </View>
                 <View style={styles.contentContainer}>
-                    <MonoText size="xl" weight="bold" color={colors.text} style={styles.title}>
+                    <MonoText weight="bold" style={styles.title}>
                         {item.title}
                     </MonoText>
-                    <MonoText size="m" color={colors.textLight} style={styles.description}>
+                    <MonoText style={styles.description}>
                         {item.description}
                     </MonoText>
                 </View>
@@ -96,18 +113,43 @@ export const OnboardingScreen = () => {
     };
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top }]}>
-            <StatusBar barStyle="dark-content" backgroundColor={colors.white} translucent={false} />
+        <View style={styles.rootContainer}>
 
-            {currentIndex < slides.length - 1 && (
+            {/* Background Layer - Dynamic Gradient */}
+            <LinearGradient
+                colors={GRADIENTS[currentIndex] || GRADIENTS[0]}
+                style={StyleSheet.absoluteFill}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 0.6 }}
+            />
+            <View style={styles.patternContainer}>
+                <Image
+                    source={require('../../assets/loadscreen/bgimage.jpg')}
+                    style={[styles.patternImage, { opacity: 0.1 }]}
+                    resizeMode="repeat"
+                />
+                <LinearGradient
+                    colors={['rgba(255,255,255,0)', '#FFFFFF']}
+                    style={StyleSheet.absoluteFill}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 0.45 }}
+                />
+            </View>
+
+            {/* Header Content */}
+            <View style={[styles.header, { top: insets.top + spacing.m }]}>
+                <Image
+                    source={require('../../assets/loadscreen/toplogo.png')}
+                    style={styles.topLogo}
+                    resizeMode="contain"
+                />
                 <TouchableOpacity
-                    style={[styles.skipBtn, { top: insets.top + 10 }]}
                     onPress={handleGetStarted}
                     activeOpacity={0.7}
                 >
-                    <MonoText size="s" weight="bold" color={colors.primary} style={styles.skipText}>Skip</MonoText>
+                    <MonoText size="m" weight="bold" color="#FF6B2B">Skip</MonoText>
                 </TouchableOpacity>
-            )}
+            </View>
 
             <View style={styles.listContainer}>
                 <FlatList
@@ -124,127 +166,143 @@ export const OnboardingScreen = () => {
                 />
             </View>
 
-            <View style={[styles.bottomSection, { paddingBottom: insets.bottom + 20 }]}>
-                {/* Pagination */}
-                <View style={styles.pagination}>
-                    {slides.map((_, index) => (
-                        <View
-                            key={index}
-                            style={[
-                                styles.dot,
-                                currentIndex === index && styles.dotActive
-                            ]}
-                        />
-                    ))}
+            <View style={[styles.bottomSection, { paddingBottom: insets.bottom + 40 }]}>
+                {/* Pagination and Next Button Row */}
+                <View style={styles.bottomRow}>
+                    <View style={styles.pagination}>
+                        {slides.map((_, index) => (
+                            <View
+                                key={index}
+                                style={[
+                                    styles.dot,
+                                    currentIndex === index ? styles.dotActive : styles.dotInactive
+                                ]}
+                            />
+                        ))}
+                    </View>
+
+                    <TouchableOpacity
+                        style={styles.nextBtn}
+                        onPress={handleNext}
+                        activeOpacity={0.8}
+                    >
+                        <MonoText weight="bold" color={colors.primary} size="m">
+                            {currentIndex === slides.length - 1 ? 'Get Started' : 'Next'}
+                        </MonoText>
+                    </TouchableOpacity>
                 </View>
-
-
-                {/* Button */}
-                <TouchableOpacity
-                    style={styles.button}
-                    onPress={handleNext}
-                    activeOpacity={0.8}
-                >
-                    <MonoText weight="bold" color={colors.white} size="m">
-                        {currentIndex === slides.length - 1 ? 'Get Started' : 'Next'}
-                    </MonoText>
-                </TouchableOpacity>
             </View>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
+    rootContainer: {
         flex: 1,
         backgroundColor: colors.white,
+    },
+    header: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: spacing.l,
+        zIndex: 10,
+    },
+    topLogo: {
+        width: 140,
+        height: 40,
     },
     listContainer: {
         flex: 1,
     },
     slide: {
         width: SCREEN_WIDTH,
+        height: '100%',
         alignItems: 'center',
-        paddingHorizontal: spacing.xl,
+        justifyContent: 'flex-start', // Shift everything up
+        paddingTop: 100, // Reduced top padding to bring illustration closer to logo
     },
     imageContainer: {
-        flex: 0.6,
+        flex: 1, // Reduced flex to take less vertical space
         justifyContent: 'center',
         alignItems: 'center',
-        marginTop: spacing.xl,
+        paddingHorizontal: spacing.xl,
+        width: '100%',
+    },
+    mainImage: {
+        width: '100%', // Sightly larger to fill width as in SS
+        height: '100%',
     },
     contentContainer: {
-        flex: 0.4,
-        alignItems: 'center',
-        marginTop: spacing.xl,
+        flex: 0.5,
+        alignItems: 'flex-start',
+        width: '100%',
+        paddingHorizontal: spacing.xl,
+        paddingTop: spacing.m, // Reduced padding
     },
     title: {
-        textAlign: 'center',
-        marginBottom: spacing.m,
-        fontSize: 24, // Matches screenshot scale
+        fontSize: 24, // More impactful
+        lineHeight: 38,
+        fontWeight: '900',
+        marginBottom: spacing.s,
+        color: '#1A1A1A',
+        textAlign: 'left',
     },
     description: {
-        textAlign: 'center',
+        fontSize: 12,
         lineHeight: 24,
-        paddingHorizontal: spacing.m,
-        opacity: 0.8,
+        color: '#555555',
+        textAlign: 'left',
+        paddingRight: spacing.xl,
     },
     bottomSection: {
         paddingHorizontal: spacing.xl,
+        width: '100%',
+    },
+    bottomRow: {
+        flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: spacing.l,
+        justifyContent: 'space-between',
+        width: '100%',
     },
     pagination: {
         flexDirection: 'row',
-        marginBottom: 32,
+        alignItems: 'center',
     },
     dot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
+        height: 10,
+        borderRadius: 5,
+        marginHorizontal: 3,
+    },
+    dotInactive: {
+        width: 10,
         backgroundColor: '#E0E0E0',
-        marginHorizontal: 4,
     },
     dotActive: {
-        width: 24,
+        width: 40,
         backgroundColor: colors.primary,
     },
-    skipBtn: {
-        position: 'absolute',
-        right: 20,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 20,
+    patternContainer: {
+        ...StyleSheet.absoluteFillObject,
         overflow: 'hidden',
-        backgroundColor: 'rgba(255, 107, 43, 0.1)', // Glass Orange tint
-        borderWidth: 1,
-        borderColor: 'rgba(255, 107, 43, 0.2)',
-        zIndex: 10,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
     },
-    skipText: {
-        fontSize: 14,
-        letterSpacing: 0.5,
-    },
-    button: {
+    patternImage: {
         width: '100%',
-        height: 56,
-        backgroundColor: colors.primary,
-        borderRadius: 28, // Fully rounded
+        height: '100%',
+        transform: [{ scale: 3 }],
+    },
+    nextBtn: {
+        minWidth: 100,
+        height: 44,
+        backgroundColor: 'rgba(255, 71, 0, 0.08)',
+        borderRadius: 22,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 71, 0, 0.15)',
         alignItems: 'center',
         justifyContent: 'center',
-        ...Platform.select({
-            ios: {
-                shadowColor: colors.primary,
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.3,
-                shadowRadius: 8,
-            },
-            android: {
-                elevation: 4,
-            },
-        }),
+        paddingHorizontal: 24,
     },
 });

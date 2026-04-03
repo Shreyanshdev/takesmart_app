@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, FlatList, Platform, Animated } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, FlatList, Platform, Animated, StatusBar } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Svg, { Path, Polyline } from 'react-native-svg';
@@ -308,6 +308,7 @@ export const OrderHistoryScreen = () => {
 
     return (
         <View style={styles.container}>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
             {/* Header */}
             <View style={[styles.header, { paddingTop: insets.top }]}>
                 <BlurView

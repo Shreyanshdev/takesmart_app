@@ -5,7 +5,7 @@ export interface CouponData {
     _id: string;
     code: string;
     description: string;
-    discountType: 'percentage' | 'fixed';
+    discountType: 'percentage' | 'fixed' | 'FREE_DELIVERY';
     discountValue: number;
     minOrderValue: number;
     maxDiscountAmount: number | null;
@@ -121,6 +121,9 @@ class CouponService {
      * Format discount display text
      */
     formatDiscount(coupon: CouponData): string {
+        if (coupon.discountType === 'FREE_DELIVERY') {
+            return `FREE DELIVERY`;
+        }
         if (coupon.discountType === 'percentage') {
             let text = `${coupon.discountValue}% OFF`;
             if (coupon.maxDiscountAmount) {

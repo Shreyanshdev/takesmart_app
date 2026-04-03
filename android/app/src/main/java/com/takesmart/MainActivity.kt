@@ -1,5 +1,6 @@
 package com.takesmart
 
+import android.os.Bundle
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -12,6 +13,16 @@ class MainActivity : ReactActivity() {
    * rendering of the component.
    */
   override fun getMainComponentName(): String = "takesmart"
+
+  /**
+   * Switch from BootTheme (orange branded splash) back to AppTheme (white background)
+   * before React Native renders. This prevents the orange splash from leaking into
+   * navigation transitions.
+   */
+  override fun onCreate(savedInstanceState: Bundle?) {
+      setTheme(R.style.AppTheme)
+      super.onCreate(savedInstanceState)
+  }
 
   /**
    * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]

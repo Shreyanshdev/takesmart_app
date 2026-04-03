@@ -1252,7 +1252,7 @@ export const AddAddressScreen = () => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle={flowState === 'initial' ? 'dark-content' : 'dark-content'} />
+            <StatusBar barStyle="dark-content" />
             {flowState === 'initial' && renderInitialState()}
             {flowState === 'search' && renderSearchState()}
             {(flowState === 'map' || flowState === 'confirm') && renderMapState()}

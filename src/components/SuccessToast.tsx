@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { StyleSheet, View, Dimensions, Platform } from 'react-native';
+import { StyleSheet, View, Dimensions, Platform, TouchableOpacity } from 'react-native';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -92,6 +92,12 @@ export const SuccessToast = () => {
                 <MonoText size="s" weight="bold" color={colors.text} style={styles.message}>
                     {message}
                 </MonoText>
+                <TouchableOpacity onPress={hideToast} style={styles.closeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                        <Line x1="18" y1="6" x2="6" y2="18" />
+                        <Line x1="6" y1="6" x2="18" y2="18" />
+                    </Svg>
+                </TouchableOpacity>
             </View>
         </Animated.View>
     );
@@ -146,5 +152,13 @@ const styles = StyleSheet.create({
     },
     message: {
         flex: 1,
+        marginRight: spacing.s,
+    },
+    closeBtn: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

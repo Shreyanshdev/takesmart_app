@@ -50,6 +50,7 @@ export const ProductCard = ({ product, variantSelected, onPress, style }: Produc
         const success = addToCart({
             ...product,
             _id: cartItemId, // Ensure we use the specific variant ID in the cart
+            inventoryId: cartItemId, // Fixes sync issue: use variant ID over product
             name: product.name,
             image: productImage || '',
             price: originalPrice,
@@ -61,7 +62,7 @@ export const ProductCard = ({ product, variantSelected, onPress, style }: Produc
             } : undefined,
             formattedQuantity: variant?.variant ? `${variant.variant.weightValue} ${variant.variant.weightUnit}` : undefined
         } as any);
-        
+
         if (!success) {
             const currentQuantity = getItemQuantity(cartItemId);
             if (currentQuantity >= (variant?.stock || 0)) {

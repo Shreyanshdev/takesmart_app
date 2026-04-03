@@ -174,7 +174,6 @@ export const PartnerHomeScreen = () => {
     if (availableError && availableOrders.length === 0) {
         return (
             <View style={[styles.container, styles.center]}>
-                <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
                 <MonoText size="l" weight="bold" color={colors.error} style={{ marginBottom: spacing.s }}>
                     Oops!
                 </MonoText>
@@ -193,7 +192,6 @@ export const PartnerHomeScreen = () => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
             {/* Header with Logout */}
             <PartnerHeader variant="primary" />

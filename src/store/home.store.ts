@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { Product, Category, productService } from '../services/customer/product.service';
 import { UserProfile, userService } from '../services/customer/user.service';
 import { orderService } from '../services/customer/order.service';
+import { homeService, HomeLayoutSection } from '../services/customer/home.service';
 import { getCurrentBranchId } from './branch.store';
 import { logger } from '../utils/logger';
 
@@ -15,6 +16,10 @@ export interface HomeState {
     normalProducts: Product[];
     userProfile: UserProfile | null;
     awaitingConfirmationCount: number;
+
+    // Dynamic Home Layout
+    homeLayoutSections: HomeLayoutSection[];
+    isLayoutLoading: boolean;
 
     // Pagination State (cursor-based)
     nextCursor: string | null;
@@ -30,6 +35,7 @@ export interface HomeState {
     setScrollY: (y: number) => void;
 
     fetchHomeData: () => Promise<void>;
+    fetchHomeLayout: () => Promise<void>;
     loadMoreProducts: () => Promise<void>;
 }
 
@@ -43,6 +49,10 @@ export const useHomeStore = create<HomeState>((set, get) => ({
     userProfile: null,
     awaitingConfirmationCount: 0,
 
+    // Dynamic Home Layout
+    homeLayoutSections: [],
+    isLayoutLoading: false,
+
     // Pagination state
     nextCursor: null,
     hasMore: true,
@@ -52,7 +62,11 @@ export const useHomeStore = create<HomeState>((set, get) => ({
     error: null,
 
     setLocationHeaderVisible: (visible) => set({ isLocationHeaderVisible: visible }),
-    setTabBarVisible: (visible) => set({ isTabBarVisible: visible }),
+    setTabBarVisible: (visible) => {
+        if (get().isTabBarVisible !== visible) {
+            set({ isTabBarVisible: visible });
+        }
+    },
     setScrollY: (y) => set({ scrollY: y }),
 
     fetchHomeData: async () => {
@@ -159,6 +173,22 @@ export const useHomeStore = create<HomeState>((set, get) => ({
                 isLoading: false,
                 error: !hasData ? (error.message || 'Failed to refresh data.') : null
             });
+        }
+    },
+
+    /**
+     * Fetch dynamic home layout sections
+     * Called alongside fetchHomeData for the dynamic home screen
+     */
+    fetchHomeLayout: async () => {
+        set({ isLayoutLoading: true });
+        try {
+            const branchId = getCurrentBranchId();
+            const sections = await homeService.getHomeLayoutFeed(branchId || undefined);
+            set({ homeLayoutSections: sections, isLayoutLoading: false });
+        } catch (error: any) {
+            logger.error('Failed to fetch home layout', error);
+            set({ isLayoutLoading: false });
         }
     },
 

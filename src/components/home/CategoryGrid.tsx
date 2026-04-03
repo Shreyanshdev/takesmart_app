@@ -1,83 +1,102 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import Animated, { FadeInRight } from 'react-native-reanimated';
+import { View, StyleSheet, TouchableOpacity, Image, Dimensions, Platform } from 'react-native';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../shared/MonoText';
+import { SectionHeader } from './SectionHeader';
 import Icon from 'react-native-vector-icons/Feather';
-
-const CATEGORIES = [
-    { id: '1', name: 'Milk', color: '#E3F2FD' },
-    { id: '2', name: 'Ghee', color: '#FFF8E1' },
-    { id: '3', name: 'Curd', color: '#F3E5F5' },
-    { id: '4', name: 'Paneer', color: '#E8F5E9' },
-    { id: '5', name: 'Butter', color: '#FFF3E0' },
-];
-
+import { useNavigation } from '@react-navigation/native';
 import { Category } from '../../services/customer/product.service';
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from 'react-native-svg';
+
+const { width } = Dimensions.get('window');
+const NUM_COLUMNS = 4;
+const GRID_PADDING = spacing.m;
+const GRID_GAP = 10;
+const ITEM_WIDTH = (width - GRID_PADDING * 2 - GRID_GAP * (NUM_COLUMNS - 1)) / NUM_COLUMNS;
+
+// Curated accent colors for each category position
+const THEME_ORANGE = colors.primary;
+const THEME_BG = '#FFF5F0';
+
+const ACCENT_COLORS = [THEME_ORANGE];
+const ACCENT_BGS = [THEME_BG];
 
 interface CategoryGridProps {
     categories: Category[];
+    title?: string;
 }
 
-import { ENV } from '../../utils/env';
-
-import { useNavigation } from '@react-navigation/native';
-
-const CategoryItem = ({ cat, index }: { cat: Category, index: number }) => {
-    const [imgError, setImgError] = React.useState<string | null>(null);
+const CategoryItem = ({ cat, index }: { cat: Category; index: number }) => {
+    const [imgError, setImgError] = React.useState(false);
     const navigation = useNavigation<any>();
+    const accent = ACCENT_COLORS[index % ACCENT_COLORS.length];
+    const accentBg = ACCENT_BGS[index % ACCENT_BGS.length];
 
     return (
-        <Animated.View
-            entering={FadeInRight.delay(index * 100).springify()}
-        >
+        <Animated.View entering={FadeInDown.delay(index * 50).duration(350).springify()}>
             <TouchableOpacity
-                style={[styles.card, { backgroundColor: cat.color || '#F5F5F5' }]}
-                onPress={() => navigation.navigate('Categories', { initialCategory: cat._id })}
+                style={styles.card}
+                onPress={() => navigation.navigate('Subcategories', { categoryId: cat._id, subcategoryName: cat.name })}
+                activeOpacity={0.8}
             >
-                {/* Use Real Image if available, else placeholder */}
-                {!imgError && cat.image ? (
-                    <Image
-                        source={{ uri: cat.image }}
-                        style={styles.image}
-                        resizeMode="cover"
-                        onError={() => setImgError('Failed')}
-                    />
-                ) : (
-                    <View style={[styles.imagePlaceholder, { justifyContent: 'center', alignItems: 'center' }]}>
-                        <Icon name="image" size={20} color={colors.textLight} />
-                    </View>
-                )}
-                <MonoText size="s" weight="semiBold" style={styles.name}>{cat.name}</MonoText>
+                <View style={[styles.imageWrapper, { backgroundColor: cat.color || accentBg }]}>
+                    {!imgError && cat.image ? (
+                        <>
+                            <Image
+                                source={{ uri: cat.image }}
+                                style={styles.image}
+                                resizeMode="cover"
+                                onError={() => setImgError(true)}
+                            />
+                            {/* Subtle bottom gradient for depth */}
+                            <View style={styles.imageOverlay}>
+                                <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+                                    <Defs>
+                                        <SvgLinearGradient id={`cat-g-${index}`} x1="0" y1="0" x2="0" y2="1">
+                                            <Stop offset="0" stopColor="#000" stopOpacity="0" />
+                                            <Stop offset="1" stopColor="#000" stopOpacity="0.12" />
+                                        </SvgLinearGradient>
+                                    </Defs>
+                                    <Rect width="100" height="100" fill={`url(#cat-g-${index})`} />
+                                </Svg>
+                            </View>
+                        </>
+                    ) : (
+                        <View style={[styles.placeholderContainer, { backgroundColor: accentBg }]}>
+                            <Icon name="grid" size={22} color={accent} />
+                        </View>
+                    )}
+                </View>
+                <MonoText size="xs" weight="semiBold" numberOfLines={2} style={styles.name} color="#374151">
+                    {cat.name}
+                </MonoText>
             </TouchableOpacity>
         </Animated.View>
     );
 };
 
-export const CategoryGrid = ({ categories }: CategoryGridProps) => {
+export const CategoryGrid = ({ categories, title = 'Shop by Category' }: CategoryGridProps) => {
+    const navigation = useNavigation<any>();
+
     if (!categories || categories.length === 0) return null;
+
+    const maxShow = 8;
+    const displayCategories = categories.slice(0, maxShow);
+    const hasMore = categories.length > maxShow;
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
-                <View style={styles.headerTitleRow}>
-                    <View style={styles.decorativeLine} />
-                    <MonoText size="l" weight="bold" style={styles.headerTitle}>Explore Categories</MonoText>
-                    <View style={styles.decorativeLine} />
-                </View>
-                {/* Optional: Add See All if many categories */}
-                {/* <MonoText size="s" color={colors.primary} weight="bold">See All</MonoText> */}
-            </View>
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.scrollContent}
-            >
-                {categories.map((cat, index) => (
+            <SectionHeader
+                title={title}
+                onSeeAll={hasMore ? () => navigation.navigate('Categories') : undefined}
+            />
+            <View style={styles.grid}>
+                {displayCategories.map((cat, index) => (
                     <CategoryItem key={cat._id} cat={cat} index={index} />
                 ))}
-            </ScrollView>
+            </View>
         </View>
     );
 };
@@ -86,52 +105,66 @@ const styles = StyleSheet.create({
     container: {
         marginBottom: spacing.l,
     },
-    header: {
-        marginBottom: spacing.m,
-        paddingHorizontal: spacing.m,
-    },
-    headerTitleRow: {
+    grid: {
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: spacing.s,
-    },
-    headerTitle: {
-        textTransform: 'uppercase',
-        letterSpacing: 1,
-        color: colors.textLight,
-    },
-    decorativeLine: {
-        height: 1,
-        backgroundColor: colors.border,
-        flex: 1,
-    },
-    scrollContent: {
-        paddingHorizontal: spacing.m,
-        gap: spacing.m,
+        flexWrap: 'wrap',
+        paddingHorizontal: GRID_PADDING,
+        columnGap: GRID_GAP,
+        rowGap: GRID_GAP + 8,
     },
     card: {
-        width: 80,
-        height: 100,
+        width: ITEM_WIDTH,
+        alignItems: 'center',
+    },
+    imageWrapper: {
+        width: ITEM_WIDTH,
+        height: ITEM_WIDTH,
         borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
-        padding: spacing.s,
+        overflow: 'hidden',
+        marginBottom: 8,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: 0.08,
+                shadowRadius: 8,
+            },
+            android: {
+                elevation: 3,
+            },
+        }),
     },
-    imagePlaceholder: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: 'rgba(255,255,255,0.5)',
-        marginBottom: spacing.s,
+    image: {
+        width: '100%',
+        height: '100%',
+    },
+    imageOverlay: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '40%',
+    },
+    placeholderContainer: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    accentDot: {
+        position: 'absolute',
+        top: 6,
+        right: 6,
+        width: 5,
+        height: 5,
+        borderRadius: 3,
+        opacity: 0.8,
     },
     name: {
         textAlign: 'center',
+        lineHeight: 16,
+        maxWidth: ITEM_WIDTH + 4,
     },
-    image: {
-        width: 40,
-        height: 40,
-        marginBottom: spacing.s,
-        borderRadius: 20,
-    }
 });

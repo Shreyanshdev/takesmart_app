@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from '@react-native-community/blur';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { SkeletonItem } from './SkeletonLoader';
-import { ProductSkeleton } from './ProductSkeleton';
+import { StripCardSkeleton } from '../home/HomeSkeletons';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from './MonoText';
@@ -42,11 +42,9 @@ export const CheckoutSkeleton = () => {
                         <SkeletonItem width={180} height={20} borderRadius={4} style={{ marginBottom: 4 }} />
                         <SkeletonItem width={220} height={12} borderRadius={4} style={{ marginBottom: 16 }} />
                     </View>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: spacing.l }}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: spacing.l, gap: 12 }}>
                         {[1, 2, 3].map((i) => (
-                            <View key={i} style={{ marginRight: 14 }}>
-                                <ProductSkeleton width={160} />
-                            </View>
+                            <StripCardSkeleton key={i} width={135} />
                         ))}
                     </ScrollView>
                 </View>

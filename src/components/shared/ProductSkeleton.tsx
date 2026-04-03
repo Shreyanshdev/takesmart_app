@@ -22,38 +22,48 @@ export const ProductSkeleton: React.FC<ProductSkeletonProps> = ({ width: manualW
                 style
             ]}
         >
-            {/* Image Container Skeleton */}
+            {/* Image Container Skeleton — matches ProductGridCard */}
             <View style={styles.imageContainer}>
                 <SkeletonItem width="100%" height="100%" borderRadius={12} />
 
-                {/* Rating Badge Skeleton Overlay */}
-                <View style={styles.ratingOverlay}>
-                    <SkeletonItem width={40} height={16} borderRadius={6} />
+                {/* Bookmark placeholder (top-left like ProductGridCard) */}
+                <View style={styles.bookmarkOverlay}>
+                    <SkeletonItem width={28} height={28} borderRadius={14} />
+                </View>
+
+                {/* Variant badge placeholder (bottom-left like ProductGridCard) */}
+                <View style={styles.variantOverlay}>
+                    <SkeletonItem width={50} height={20} borderRadius={6} />
                 </View>
             </View>
 
-            {/* Info Section Skeleton */}
+            {/* Info Section Skeleton — matches ProductGridCard layout */}
             <View style={styles.infoContainer}>
-                {/* Name Skeleton */}
-                <SkeletonItem width="90%" height={16} borderRadius={4} style={{ marginBottom: 6 }} />
-                <SkeletonItem width="60%" height={16} borderRadius={4} style={{ marginBottom: 8 }} />
+                {/* Product Name (2 lines) */}
+                <SkeletonItem width="100%" height={14} borderRadius={4} style={{ marginBottom: 4 }} />
+                <SkeletonItem width="65%" height={14} borderRadius={4} style={{ marginBottom: 6 }} />
 
-                {/* Rating Row Skeleton */}
+                {/* Rating Row */}
                 <View style={styles.ratingRow}>
-                    <SkeletonItem width={50} height={12} borderRadius={4} />
+                    <SkeletonItem width={12} height={12} borderRadius={6} />
+                    <SkeletonItem width={24} height={12} borderRadius={4} style={{ marginLeft: 4 }} />
+                    <SkeletonItem width={20} height={10} borderRadius={4} style={{ marginLeft: 4 }} />
                 </View>
 
-                {/* Short Desc Skeleton */}
-                <SkeletonItem width="80%" height={12} borderRadius={4} style={{ marginTop: 6 }} />
+                {/* Discount Row */}
+                <View style={styles.discountRow}>
+                    <SkeletonItem width={52} height={12} borderRadius={4} />
+                    <View style={styles.dashedLine} />
+                </View>
 
-                {/* Price and Action Row */}
+                {/* Footer: Price + ADD button */}
                 <View style={styles.footerRow}>
                     <View style={styles.priceColumn}>
-                        <SkeletonItem width={40} height={14} borderRadius={4} style={{ marginBottom: 4 }} />
-                        <SkeletonItem width={60} height={18} borderRadius={4} />
+                        <SkeletonItem width={36} height={10} borderRadius={4} style={{ marginBottom: 4 }} />
+                        <SkeletonItem width={50} height={16} borderRadius={4} />
                     </View>
 
-                    {/* Button Skeleton */}
+                    {/* ADD Button skeleton */}
                     <SkeletonItem width={72} height={32} borderRadius={8} />
                 </View>
             </View>
@@ -89,10 +99,16 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         position: 'relative',
     },
-    ratingOverlay: {
+    bookmarkOverlay: {
+        position: 'absolute',
+        top: 8,
+        left: 8,
+        zIndex: 1,
+    },
+    variantOverlay: {
         position: 'absolute',
         bottom: 8,
-        right: 8,
+        left: 8,
         zIndex: 1,
     },
     infoContainer: {
@@ -104,11 +120,22 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginTop: 4,
     },
+    discountRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 6,
+    },
+    dashedLine: {
+        flex: 1,
+        height: 1,
+        marginLeft: 8,
+        backgroundColor: '#E2E8F0',
+    },
     footerRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 12,
+        marginTop: 8,
     },
     priceColumn: {
         flexDirection: 'column',

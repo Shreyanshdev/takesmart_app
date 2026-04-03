@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Platform, Dimensions, ActivityIndicator, Image } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView, Platform, Dimensions, ActivityIndicator, Image, RefreshControl } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
@@ -8,8 +8,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MonoText } from '../../../components/shared/MonoText';
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';
-import { ProductGridCard } from '../../../components/shared/ProductGridCard';
-import { ProductSkeleton } from '../../../components/shared/ProductSkeleton';
+import { StripProductCard } from '../../../components/home/ProductStrip';
+import { StripCardSkeleton } from '../../../components/home/HomeSkeletons';
+import { SkeletonItem } from '../../../components/shared/SkeletonLoader';
 import { Product, productService, SubCategory } from '../../../services/customer/product.service';
 import { useBranchStore } from '../../../store/branch.store';
 import { useCartStore } from '../../../store/cart.store';
@@ -17,6 +18,7 @@ import { ProductDetailsModal } from '../../../components/home/ProductDetailsModa
 import { FloatingCarts } from '../../../components/home/FloatingCarts';
 import { NoServiceScreen } from '../../../components/shared/NoServiceScreen';
 import { BrandFooter } from '../../../components/shared/BrandFooter';
+import { ProductFilters, SortFilterBar, FilterState, DEFAULT_FILTERS } from '../../../components/shared/ProductFilters';
 
 type SubcategoriesScreenRouteProp = RouteProp<{ params: { subcategoryId: string; subcategoryName?: string; categoryId?: string } }, 'params'>;
 
@@ -24,7 +26,7 @@ const HEADER_CONTENT_HEIGHT = 56;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SIDEBAR_WIDTH = 85;
 const CONTENT_WIDTH = SCREEN_WIDTH - SIDEBAR_WIDTH;
-const CARD_WIDTH = (CONTENT_WIDTH - 24) / 2; // 12 padding each side
+const CARD_WIDTH = (CONTENT_WIDTH - 36) / 2; // account for padding + gap between cards
 
 // Glass Header
 const SubcategoriesHeader = ({ navigation, title }: { navigation: any, title: string }) => {
@@ -33,14 +35,6 @@ const SubcategoriesHeader = ({ navigation, title }: { navigation: any, title: st
 
     return (
         <View style={[styles.headerContainer, { height: headerHeight, paddingTop: insets.top }]}>
-            <View style={StyleSheet.absoluteFill}>
-                <BlurView
-                    style={StyleSheet.absoluteFill}
-                    blurType="light"
-                    blurAmount={20}
-                    reducedTransparencyFallbackColor="white"
-                />
-            </View>
             <View style={styles.headerContent}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -61,7 +55,7 @@ const SubcategoriesHeader = ({ navigation, title }: { navigation: any, title: st
 };
 
 // Sidebar Item Component
-const SidebarItem = ({
+const SidebarItem = React.memo(({
     subcategory,
     isSelected,
     onPress
@@ -69,37 +63,44 @@ const SidebarItem = ({
     subcategory: SubCategory;
     isSelected: boolean;
     onPress: () => void;
-}) => (
-    <TouchableOpacity
-        style={[styles.sidebarItem, isSelected && styles.sidebarItemSelected]}
-        onPress={onPress}
-        activeOpacity={0.7}
-    >
-        {isSelected && <View style={styles.selectedIndicator} />}
-        <View style={[styles.sidebarImageContainer, isSelected && styles.sidebarImageContainerSelected]}>
-            {subcategory.image ? (
-                <Image
-                    source={{ uri: subcategory.image }}
-                    style={styles.sidebarImage}
-                    resizeMode="cover"
-                />
-            ) : (
-                <View style={styles.sidebarPlaceholder}>
-                    <MonoText size="xs" color={colors.textLight}>IMG</MonoText>
-                </View>
-            )}
-        </View>
-        <MonoText
-            size="xs"
-            weight={isSelected ? 'bold' : 'medium'}
-            color={isSelected ? colors.primary : colors.text}
-            style={styles.sidebarText}
-            numberOfLines={2}
+}) => {
+    const [imageError, setImageError] = React.useState(false);
+    const hasImage = !!subcategory.image && !imageError;
+
+    return (
+        <TouchableOpacity
+            style={[styles.sidebarItem, isSelected && styles.sidebarItemSelected]}
+            onPress={onPress}
+            activeOpacity={0.7}
         >
-            {subcategory.name}
-        </MonoText>
-    </TouchableOpacity>
-);
+            {isSelected && <View style={styles.selectedIndicator} />}
+            <View style={[styles.sidebarImageContainer, isSelected && styles.sidebarImageContainerSelected]}>
+                {hasImage ? (
+                    <Image
+                        source={{ uri: subcategory.image, cache: 'force-cache' }}
+                        style={styles.sidebarImage}
+                        resizeMode="cover"
+                        fadeDuration={0}
+                        onError={() => setImageError(true)}
+                    />
+                ) : (
+                    <View style={styles.sidebarPlaceholder}>
+                        <MonoText size="xs" color={colors.textLight}>IMG</MonoText>
+                    </View>
+                )}
+            </View>
+            <MonoText
+                size="xs"
+                weight={isSelected ? 'bold' : 'medium'}
+                color={isSelected ? colors.primary : colors.text}
+                style={styles.sidebarText}
+                numberOfLines={2}
+            >
+                {subcategory.name}
+            </MonoText>
+        </TouchableOpacity>
+    );
+});
 
 export const SubcategoriesScreen = () => {
     const navigation = useNavigation<any>();
@@ -131,7 +132,32 @@ export const SubcategoriesScreen = () => {
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
     const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
 
+    // Filter state
+    const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+    const [filterModalVisible, setFilterModalVisible] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+
     const branchId = currentBranch?._id;
+
+    // Extract unique brands from loaded products
+    const availableBrands = React.useMemo(() => {
+        const brandSet = new Set<string>();
+        products.forEach(p => {
+            if (p.brand) brandSet.add(p.brand);
+        });
+        return Array.from(brandSet).sort();
+    }, [products]);
+
+    // Count active filters for badge
+    const activeFilterCount = React.useMemo(() => {
+        let count = 0;
+        if (filters.sort) count++;
+        if (filters.brand) count++;
+        if (filters.minPrice) count++;
+        if (filters.maxPrice) count++;
+        if (filters.onSale) count++;
+        return count;
+    }, [filters]);
 
     // Fetch subcategories on mount
     useEffect(() => {
@@ -140,12 +166,12 @@ export const SubcategoriesScreen = () => {
         }
     }, [isServiceAvailable]);
 
-    // Fetch products when selected subcategory changes
+    // Fetch products when selected subcategory or filters change
     useEffect(() => {
         if (selectedSubcategory && branchId && isServiceAvailable) {
             fetchSubcategoryProducts();
         }
-    }, [selectedSubcategory, branchId]);
+    }, [selectedSubcategory, branchId, filters]);
 
     const fetchSubcategories = async () => {
         setIsLoadingSubcategories(true);
@@ -157,19 +183,35 @@ export const SubcategoriesScreen = () => {
             let foundSubcategories: SubCategory[] = [];
             let foundInitialSub: SubCategory | null = null;
 
-            for (const group of groupedData) {
-                const match = group.subcategories.find(s => s._id === initialSubcategoryId);
-                if (match) {
-                    foundSubcategories = group.subcategories;
-                    foundInitialSub = match;
-                    break;
+            if (initialSubcategoryId) {
+                for (const group of groupedData) {
+                    const match = group.subcategories.find(s => s._id === initialSubcategoryId);
+                    if (match) {
+                        foundSubcategories = group.subcategories;
+                        foundInitialSub = match;
+                        break;
+                    }
                 }
             }
 
             // If not found, try to get subcategories by category ID if provided
             if (foundSubcategories.length === 0 && categoryIdFromRoute) {
-                foundSubcategories = await productService.getSubCategoriesByCategory(categoryIdFromRoute);
-                foundInitialSub = foundSubcategories.find(s => s._id === initialSubcategoryId) || foundSubcategories[0] || null;
+                // Try to find in groupedData first
+                const groupMatch = groupedData.find(g =>
+                    g.category._id === categoryIdFromRoute
+                );
+
+                if (groupMatch && groupMatch.subcategories && groupMatch.subcategories.length > 0) {
+                    foundSubcategories = groupMatch.subcategories;
+                } else {
+                    // Fallback to API if not in groupedData
+                    foundSubcategories = await productService.getSubCategoriesByCategory(categoryIdFromRoute);
+                }
+
+                // Set initial sub based on ID if provided, otherwise first
+                foundInitialSub = initialSubcategoryId
+                    ? (foundSubcategories.find(s => s._id === initialSubcategoryId) || foundSubcategories[0] || null)
+                    : (foundSubcategories[0] || null);
             }
 
             // Fallback: just use the initial subcategory
@@ -189,13 +231,13 @@ export const SubcategoriesScreen = () => {
             console.error('Failed to fetch subcategories:', error);
             // Fallback
             setSubcategories([{
-                _id: initialSubcategoryId,
+                _id: initialSubcategoryId || 'fallback',
                 name: initialSubcategoryName,
                 image: '',
                 category: ''
             }]);
             setSelectedSubcategory({
-                _id: initialSubcategoryId,
+                _id: initialSubcategoryId || 'fallback',
                 name: initialSubcategoryName,
                 image: '',
                 category: ''
@@ -214,10 +256,16 @@ export const SubcategoriesScreen = () => {
         setHasMore(true);
 
         try {
-            const feedData = await productService.getProductsFeed(branchId, {
+            const feedOptions: any = {
                 limit: 20,
-                subcategory: selectedSubcategory._id
-            });
+                subcategory: selectedSubcategory._id,
+            };
+            if (filters.sort) feedOptions.sort = filters.sort;
+            if (filters.brand) feedOptions.brand = filters.brand;
+            if (filters.minPrice) feedOptions.minPrice = parseInt(filters.minPrice);
+            if (filters.maxPrice) feedOptions.maxPrice = parseInt(filters.maxPrice);
+
+            const feedData = await productService.getProductsFeed(branchId, feedOptions);
 
             setProducts(feedData.products);
             setNextCursor(feedData.nextCursor);
@@ -234,11 +282,17 @@ export const SubcategoriesScreen = () => {
 
         setIsLoadingMore(true);
         try {
-            const feedData = await productService.getProductsFeed(branchId, {
+            const feedOptions: any = {
                 limit: 20,
                 cursor: nextCursor,
-                subcategory: selectedSubcategory._id
-            });
+                subcategory: selectedSubcategory._id,
+            };
+            if (filters.sort) feedOptions.sort = filters.sort;
+            if (filters.brand) feedOptions.brand = filters.brand;
+            if (filters.minPrice) feedOptions.minPrice = parseInt(filters.minPrice);
+            if (filters.maxPrice) feedOptions.maxPrice = parseInt(filters.maxPrice);
+
+            const feedData = await productService.getProductsFeed(branchId, feedOptions);
 
             setProducts(prev => [...prev, ...feedData.products]);
             setNextCursor(feedData.nextCursor);
@@ -251,8 +305,22 @@ export const SubcategoriesScreen = () => {
     };
 
     const handleSubcategorySelect = (subcategory: SubCategory) => {
+        setFilters(DEFAULT_FILTERS); // Reset filters on subcategory change
         setSelectedSubcategory(subcategory);
     };
+
+    const handleApplyFilters = useCallback((newFilters: FilterState) => {
+        setFilters(newFilters);
+    }, []);
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        try {
+            await fetchSubcategoryProducts();
+        } finally {
+            setRefreshing(false);
+        }
+    }, [branchId, selectedSubcategory, filters]);
 
     const handleProductPress = useCallback((product: Product, variantId?: string) => {
         setSelectedProduct(product);
@@ -292,29 +360,45 @@ export const SubcategoriesScreen = () => {
 
     const renderItem = useCallback(({ item }: { item: any }) => {
         const cartItemId = item.inventoryId || item._id;
-        const variantData = {
-            _id: item.inventoryId,
-            inventoryId: item.inventoryId,
-            variant: item.variant,
-            pricing: item.pricing,
-            stock: item.stock,
-            isAvailable: item.isAvailable
-        };
-        const quantity = getItemQuantity(cartItemId);
+        const productImage = item.variant?.images?.[0] || item.images?.[0] || item.image;
 
         return (
-            <ProductGridCard
-                product={item}
-                variant={variantData}
-                quantity={quantity}
-                width={CARD_WIDTH}
-                onPress={handleProductPress}
-                onAddToCart={handleAddToCart}
-                onRemoveFromCart={removeFromCart}
-                isSoldOut={!item.isAvailable}
-            />
+            <View style={{ flex: 1, paddingHorizontal: 6, marginBottom: 12 }}>
+                <StripProductCard
+                    item={item}
+                    onPress={() => handleProductPress(item, item.inventoryId)}
+                    onAddToCart={() => {
+                        const success = addToCart({
+                            ...item,
+                            _id: cartItemId,
+                            name: item.name,
+                            image: productImage || '',
+                            images: productImage ? [productImage] : (item.images || []),
+                            price: item.pricing?.mrp || 0,
+                            discountPrice: item.pricing?.sellingPrice || 0,
+                            stock: item.stock || 0,
+                            quantity: item.variant ? {
+                                value: item.variant.weightValue,
+                                unit: item.variant.weightUnit
+                            } : undefined,
+                            formattedQuantity: item.variant ? `${item.variant.weightValue} ${item.variant.weightUnit}` : undefined
+                        } as any);
+
+                        if (!success) {
+                            const { useToastStore } = require('../../../store/toast.store');
+                            const currentQuantity = getItemQuantity(cartItemId);
+                            if (currentQuantity >= (item.stock || 0)) {
+                                useToastStore.getState().showToast('Maximum stock limit reached!');
+                            } else {
+                                useToastStore.getState().showToast('Product is out of stock!');
+                            }
+                        }
+                    }}
+                    onRemoveFromCart={() => removeFromCart(cartItemId)}
+                />
+            </View>
         );
-    }, [cartItems, getItemQuantity, handleProductPress, handleAddToCart, removeFromCart]);
+    }, [cartItems, getItemQuantity, handleProductPress, addToCart, removeFromCart]);
 
     const headerTitle = selectedSubcategory?.name || initialSubcategoryName;
 
@@ -322,7 +406,6 @@ export const SubcategoriesScreen = () => {
     if (!isServiceAvailable) {
         return (
             <View style={styles.container}>
-                <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
                 <ScrollView
                     contentContainerStyle={{
                         flexGrow: 1,
@@ -343,7 +426,6 @@ export const SubcategoriesScreen = () => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
             <View style={[styles.mainContent, { paddingTop: dynamicHeaderHeight }]}>
                 {/* Sidebar */}
@@ -354,7 +436,14 @@ export const SubcategoriesScreen = () => {
                         contentContainerStyle={styles.sidebarContent}
                     >
                         {isLoadingSubcategories ? (
-                            <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 20 }} />
+                            <View style={{ paddingTop: 12 }}>
+                                {[1, 2, 3, 4, 5, 6].map((i) => (
+                                    <View key={i} style={{ alignItems: 'center', paddingVertical: 10, paddingHorizontal: 4 }}>
+                                        <SkeletonItem width={50} height={50} borderRadius={12} style={{ marginBottom: 6 }} />
+                                        <SkeletonItem width={55} height={10} borderRadius={4} />
+                                    </View>
+                                ))}
+                            </View>
                         ) : (
                             subcategories.map((sub) => (
                                 <SidebarItem
@@ -370,18 +459,29 @@ export const SubcategoriesScreen = () => {
 
                 {/* Product Grid */}
                 <View style={styles.productGrid}>
+                    {/* Sort/Filter Bar */}
+                    <SortFilterBar
+                        activeFilterCount={activeFilterCount}
+                        activeSort={filters.sort}
+                        onFilterPress={() => setFilterModalVisible(true)}
+                    />
+
                     {isLoading ? (
                         <FlashList
                             data={[1, 2, 3, 4, 5, 6]}
                             keyExtractor={(i: number) => `skeleton-${i}`}
-                            renderItem={() => <ProductSkeleton width={CARD_WIDTH} />}
+                            renderItem={() => (
+                                <View style={{ paddingHorizontal: 4, marginBottom: 12 }}>
+                                    <StripCardSkeleton width={CARD_WIDTH} />
+                                </View>
+                            )}
                             numColumns={2}
                             contentContainerStyle={{
                                 paddingHorizontal: 6,
                                 paddingTop: spacing.m,
                                 paddingBottom: 120
                             }}
-                            estimatedItemSize={280}
+                            estimatedItemSize={260}
                             showsVerticalScrollIndicator={false}
                         />
                     ) : (
@@ -395,10 +495,18 @@ export const SubcategoriesScreen = () => {
                                 paddingTop: spacing.m,
                                 paddingBottom: 120
                             }}
-                            estimatedItemSize={280}
+                            estimatedItemSize={260}
                             showsVerticalScrollIndicator={false}
                             onEndReached={loadMoreProducts}
                             onEndReachedThreshold={0.5}
+                            refreshControl={
+                                <RefreshControl
+                                    refreshing={refreshing}
+                                    onRefresh={onRefresh}
+                                    colors={[colors.primary]}
+                                    tintColor={colors.primary}
+                                />
+                            }
                             ListFooterComponent={isLoadingMore ? (
                                 <View style={styles.loadingMore}>
                                     <ActivityIndicator size="small" color={colors.primary} />
@@ -426,6 +534,15 @@ export const SubcategoriesScreen = () => {
             />
 
             <FloatingCarts showWithTabBar={false} />
+
+            {/* Filter Modal */}
+            <ProductFilters
+                visible={filterModalVisible}
+                onClose={() => setFilterModalVisible(false)}
+                onApply={handleApplyFilters}
+                currentFilters={filters}
+                availableBrands={availableBrands}
+            />
         </View>
     );
 };
@@ -442,7 +559,9 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         zIndex: 100,
-        backgroundColor: 'rgba(255, 255, 255, 0.85)',
+        backgroundColor: colors.white,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(0,0,0,0.08)',
     },
     headerContent: {
         height: HEADER_CONTENT_HEIGHT,
@@ -532,6 +651,8 @@ const styles = StyleSheet.create({
         backgroundColor: colors.white,
         overflow: 'hidden',
         marginBottom: 4,
+        borderWidth: 2,
+        borderColor: 'transparent',
         ...Platform.select({
             ios: {
                 shadowColor: '#000',
@@ -545,7 +666,6 @@ const styles = StyleSheet.create({
         }),
     },
     sidebarImageContainerSelected: {
-        borderWidth: 2,
         borderColor: colors.primary,
     },
     sidebarImage: {

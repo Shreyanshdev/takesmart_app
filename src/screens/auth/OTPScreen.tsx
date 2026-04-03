@@ -1,23 +1,24 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, StyleSheet, TextInput, TouchableOpacity, Platform, KeyboardAvoidingView, ScrollView, Alert, Dimensions, StatusBar } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, StyleSheet, TextInput, TouchableOpacity, Platform, KeyboardAvoidingView, ScrollView, Alert, Dimensions, StatusBar, Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import Animated, { useAnimatedStyle, useSharedValue, withSequence, withTiming, withRepeat } from 'react-native-reanimated';
 import { BlurView } from '@react-native-community/blur';
 import LinearGradient from 'react-native-linear-gradient';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
+import { spacing } from '../../theme/spacing';
 import { MonoText } from '../../components/shared/MonoText';
 import { authService } from '../../services/auth/auth.service';
 
-
-const { width } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type OTPRouteProp = RouteProp<{ params: { phoneNumber: string, verificationId: string } }, 'params'>;
 
 export const OTPScreen = () => {
     const navigation = useNavigation<any>();
     const route = useRoute<OTPRouteProp>();
+    const insets = useSafeAreaInsets();
     const { phoneNumber, verificationId: initialVerificationId } = route.params;
 
     const [otp, setOtp] = useState(['', '', '', '']);
@@ -131,39 +132,66 @@ export const OTPScreen = () => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="dark-content" />
-            <LinearGradient
-                colors={['#FFF8F0', '#FFFDD0', '#FFF5E6']}
-                style={styles.gradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-            />
 
-            <SafeAreaView style={styles.safeArea}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            {/* Background Layer - Branded Theme */}
+            <LinearGradient
+                colors={['#DEFCE1', '#FFFFFF']}
+                style={StyleSheet.absoluteFill}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 0.6 }}
+            />
+            <View style={styles.patternContainer}>
+                <Image
+                    source={require('../../assets/loadscreen/bgimage.jpg')}
+                    style={[styles.patternImage, { opacity: 0.1 }]}
+                    resizeMode="repeat"
+                />
+                <LinearGradient
+                    colors={['rgba(255,255,255,0)', '#FFFFFF']}
+                    style={StyleSheet.absoluteFill}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 0.45 }}
+                />
+            </View>
+
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={styles.keyboardView}
+            >
+                {/* Back Button */}
+                <TouchableOpacity
+                    style={[styles.backButton, { top: insets.top + spacing.s }]}
+                    onPress={() => navigation.goBack()}
+                >
                     <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
                         <Path d="M19 12H5M12 19l-7-7 7-7" />
                     </Svg>
                 </TouchableOpacity>
 
-                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-                    <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+                <ScrollView
+                    contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 60 }]}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                >
+                    <View style={styles.contentContainer}>
+                        {/* Title Section */}
                         <View style={styles.headerSection}>
-                            <MonoText size="xxl" weight="bold" color={colors.text} style={styles.title}>
+                            <MonoText style={styles.title}>
                                 Verify Your{'\n'}Number
                             </MonoText>
-                            <MonoText size="s" color={colors.textLight} style={styles.subtitle}>
+                            <MonoText style={styles.subtitle}>
                                 We've sent a 4-digit code to{'\n'}
                                 <MonoText weight="bold" color={colors.text}>+91 {phoneNumber}</MonoText>
                             </MonoText>
                         </View>
 
+                        {/* OTP Input Section */}
                         <Animated.View style={[styles.otpRow, animatedStyle]}>
                             {otp.map((digit, index) => (
                                 <View key={index} style={styles.otpInputWrapper}>
                                     <TextInput
                                         ref={(ref) => { inputs.current[index] = ref; }}
-                                        style={[styles.otpInput, error && styles.otpInputError]}
+                                        style={[styles.otpInput, error ? styles.otpInputError : null]}
                                         value={digit}
                                         onChangeText={(text) => handleOtpChange(text, index)}
                                         onKeyPress={({ nativeEvent }) => handleBackspace(nativeEvent.key, index)}
@@ -196,15 +224,18 @@ export const OTPScreen = () => {
                             )}
                         </View>
 
+                        {/* Verify Button - Glass Style */}
                         <TouchableOpacity
                             style={[styles.verifyBtn, (otp.some(d => !d) || loading) && styles.disabledBtn]}
                             onPress={handleVerifyOtp}
                             disabled={otp.some(d => !d) || loading}
+                            activeOpacity={0.8}
                         >
                             <BlurView
                                 style={StyleSheet.absoluteFill}
                                 blurType="light"
                                 blurAmount={15}
+                                reducedTransparencyFallbackColor="white"
                             />
                             <LinearGradient
                                 colors={['rgba(255, 71, 0, 0.1)', 'rgba(255, 71, 0, 0.05)']}
@@ -215,72 +246,137 @@ export const OTPScreen = () => {
                                 </MonoText>
                             </LinearGradient>
                         </TouchableOpacity>
-                    </ScrollView>
-                </KeyboardAvoidingView>
-            </SafeAreaView>
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.secondary },
-    gradient: { ...StyleSheet.absoluteFillObject },
-    safeArea: { flex: 1 },
-    backBtn: {
+    container: {
+        flex: 1,
+        backgroundColor: colors.white,
+    },
+    patternContainer: {
+        ...StyleSheet.absoluteFillObject,
+        overflow: 'hidden',
+    },
+    patternImage: {
+        width: '100%',
+        height: '100%',
+        transform: [{ scale: 3 }],
+    },
+    keyboardView: {
+        flex: 1,
+    },
+    backButton: {
+        position: 'absolute',
+        left: 16,
         width: 44,
         height: 44,
         borderRadius: 22,
         backgroundColor: colors.white,
         justifyContent: 'center',
         alignItems: 'center',
-        marginLeft: 16,
-        marginTop: 8,
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
+        zIndex: 10,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.1,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 4,
+            },
+        }),
     },
-    scrollContent: { padding: 24, flexGrow: 1, justifyContent: 'center' },
-    headerSection: { marginBottom: 40 },
-    title: { fontSize: 32, marginBottom: 12 },
-    subtitle: { fontSize: 16, lineHeight: 24 },
+    scrollContent: {
+        flexGrow: 1,
+        paddingHorizontal: spacing.xl,
+        justifyContent: 'center',
+    },
+    contentContainer: {
+        width: '100%',
+        alignItems: 'center',
+    },
+    headerSection: {
+        marginBottom: 40,
+        alignItems: 'center',
+    },
+    title: {
+        fontSize: 32,
+        lineHeight: 40,
+        fontWeight: '900',
+        color: '#1A1A1A',
+        marginBottom: spacing.s,
+        textAlign: 'center',
+    },
+    subtitle: {
+        fontSize: 16,
+        lineHeight: 24,
+        color: '#666666',
+        textAlign: 'center',
+    },
     otpRow: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        justifyContent: 'center',
+        gap: spacing.m,
         marginBottom: 20,
     },
     otpInputWrapper: {
-        width: (width - 48 - 60) / 4,
-        height: 70,
-        backgroundColor: colors.white,
-        borderRadius: 16,
+        width: 64,
+        height: 72,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 20,
         borderWidth: 1,
         borderColor: 'rgba(0,0,0,0.06)',
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
+        justifyContent: 'center',
+        alignItems: 'center',
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.05,
+                shadowRadius: 10,
+            },
+            android: {
+                elevation: 2,
+            },
+        }),
     },
     otpInput: {
-        flex: 1,
-        textAlign: 'center',
         fontSize: 28,
-        fontWeight: 'bold',
+        fontFamily: 'NotoSansMono-Bold',
         color: colors.text,
+        width: '100%',
+        textAlign: 'center',
     },
-    otpInputError: { borderColor: colors.error },
-    errorText: { textAlign: 'center', marginBottom: 20 },
-    timerSection: { alignItems: 'center', marginBottom: 40 },
+    otpInputError: {
+        borderColor: colors.error,
+        borderWidth: 2,
+    },
+    errorText: {
+        textAlign: 'center',
+        marginBottom: 20,
+    },
+    timerSection: {
+        alignItems: 'center',
+        marginBottom: 40,
+    },
     verifyBtn: {
-        height: 60,
-        borderRadius: 20,
+        width: '100%',
+        height: 56,
+        borderRadius: 28,
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(255, 71, 0, 0.2)',
     },
-    disabledBtn: { opacity: 0.5 },
+    disabledBtn: {
+        opacity: 0.5,
+        borderColor: 'rgba(0,0,0,0.1)',
+    },
     buttonGradient: {
         flex: 1,
         flexDirection: 'row',

@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, TextInput, Platform, Alert } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, TextInput, Platform, Alert, Keyboard, Modal, Animated, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
-import { BlurBottomSheet } from '../shared/BlurBottomSheet';
+import { BlurView } from '@react-native-community/blur';
 import { MonoText } from '../shared/MonoText';
 import { SkeletonItem } from '../shared/SkeletonLoader';
 import { colors } from '../../theme/colors';
@@ -68,14 +68,12 @@ export const AddressSelectionModal: React.FC<AddressSelectionModalProps> = ({
     }, []);
 
     const handleSelectSearchResult = (placeId: string) => {
-        onClose();
-        // Redirect to AddAddress in quick select mode
+        handleClose();
         navigation.navigate('AddAddress', {
             isQuickSelect: true,
             selectedPlaceId: placeId
         });
     };
-
 
     const fetchAddresses = useCallback(async () => {
         setLoading(true);
@@ -97,9 +95,8 @@ export const AddressSelectionModal: React.FC<AddressSelectionModalProps> = ({
 
     const handleSelectSavedAddress = async (address: Address) => {
         if (!address.latitude || !address.longitude) {
-            // If address doesn't have coordinates, just select it without branch assignment
             onSelectAddress(address, null, `${address.addressLine1}, ${address.city}`);
-            onClose();
+            handleClose();
             return;
         }
 
@@ -112,7 +109,7 @@ export const AddressSelectionModal: React.FC<AddressSelectionModalProps> = ({
             onSelectAddress(address, null, `${address.addressLine1}, ${address.city}`);
         } finally {
             setSelectingAddressId(null);
-            onClose();
+            handleClose();
         }
     };
 
@@ -122,7 +119,7 @@ export const AddressSelectionModal: React.FC<AddressSelectionModalProps> = ({
 
     const handleEditAddress = (address: Address) => {
         setOptionsMenuAddressId(null);
-        onClose();
+        handleClose();
         navigation.navigate('AddAddress', { editAddress: address });
     };
 
@@ -151,211 +148,339 @@ export const AddressSelectionModal: React.FC<AddressSelectionModalProps> = ({
 
     const handleUseCurrentLocation = () => {
         onUseCurrentLocation();
-        onClose();
+        handleClose();
     };
 
     const handleAddNewAddress = () => {
-        onClose();
+        handleClose();
         navigation.navigate('AddAddress');
     };
 
+    // Animation values
+    const slideAnim = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+    const overlayAnim = useRef(new Animated.Value(0)).current;
+    const [modalVisible, setModalVisible] = useState(false);
+
+    // Animate out then hide modal
+    const handleClose = useCallback(() => {
+        Animated.parallel([
+            Animated.timing(overlayAnim, {
+                toValue: 0,
+                duration: 200,
+                useNativeDriver: true,
+            }),
+            Animated.timing(slideAnim, {
+                toValue: Dimensions.get('window').height,
+                duration: 250,
+                useNativeDriver: true,
+            }),
+        ]).start(() => {
+            setModalVisible(false);
+            onClose();
+        });
+    }, [onClose, overlayAnim, slideAnim]);
+
+    // Animate in/out based on visible prop
+    useEffect(() => {
+        if (visible && !modalVisible) {
+            setModalVisible(true);
+            Animated.parallel([
+                Animated.timing(overlayAnim, {
+                    toValue: 1,
+                    duration: 300,
+                    useNativeDriver: true,
+                }),
+                Animated.spring(slideAnim, {
+                    toValue: 0,
+                    tension: 65,
+                    friction: 11,
+                    useNativeDriver: true,
+                }),
+            ]).start();
+        } else if (!visible && modalVisible) {
+            // Parent forced close
+            handleClose();
+        }
+    }, [visible, modalVisible, handleClose, overlayAnim, slideAnim]);
+
     return (
-        <BlurBottomSheet visible={visible} onClose={onClose}>
-            <View style={styles.container}>
-                <MonoText size="l" weight="bold" style={styles.title}>
-                    Select delivery location
-                </MonoText>
+        <Modal
+            visible={modalVisible}
+            transparent
+            animationType="none"
+            onRequestClose={handleClose}
+            statusBarTranslucent={true}
+        >
+            <View style={[styles.wrapper, { paddingTop: insets.top }]}>
+                {/* Animated blur/dark overlay */}
+                <Animated.View style={[StyleSheet.absoluteFill, { opacity: overlayAnim }]}>
+                    <BlurView
+                        style={StyleSheet.absoluteFill}
+                        blurType="dark"
+                        blurAmount={15}
+                        reducedTransparencyFallbackColor="rgba(0,0,0,0.5)"
+                    />
+                </Animated.View>
 
-                {/* Search Bar */}
-                <View style={styles.searchContainer}>
-                    <View style={styles.searchInputWrapper}>
-                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <Circle cx="11" cy="11" r="8" />
-                            <Line x1="21" y1="21" x2="16.65" y2="16.65" />
-                        </Svg>
-                        <TextInput
-                            style={styles.searchInput}
-                            placeholder="Search for area, street name..."
-                            placeholderTextColor={colors.textLight}
-                            value={searchQuery}
-                            onChangeText={handleSearch}
-                        />
-                    </View>
-                </View>
-
-                {/* Search Results Overlay */}
-                {searchQuery.length >= 3 && (
-                    <View style={styles.searchResults}>
-                        {isSearching ? (
-                            <ActivityIndicator size="small" color={colors.primary} style={{ padding: spacing.m }} />
-                        ) : searchResults.length > 0 ? (
-                            searchResults.map((item) => (
-                                <TouchableOpacity
-                                    key={item.place_id}
-                                    style={styles.searchResultItem}
-                                    onPress={() => handleSelectSearchResult(item.place_id)}
-                                >
-                                    <View style={styles.searchResultIcon}>
-                                        <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                                            <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                                            <Circle cx="12" cy="10" r="3" />
-                                        </Svg>
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <MonoText weight="bold" size="s">{item.structured_formatting.main_text}</MonoText>
-                                        <MonoText size="xs" color={colors.textLight} numberOfLines={1}>
-                                            {item.structured_formatting.secondary_text}
-                                        </MonoText>
-                                    </View>
-                                </TouchableOpacity>
-                            ))
-                        ) : (
-                            <MonoText size="xs" color={colors.textLight} style={{ padding: spacing.m }}>No results found</MonoText>
-                        )}
-                    </View>
-                )}
-
-                <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 500 }}>
-                    {/* Action Buttons */}
-                    <View style={styles.actionSection}>
-                        <TouchableOpacity
-                            style={styles.actionBtn}
-                            onPress={handleUseCurrentLocation}
-                            disabled={isFetchingLocation}
-                        >
-                            <View style={styles.actionIconCircle}>
-                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isFetchingLocation ? "#2D7A14" : "#2D7A14"} strokeWidth="2">
-                                    <Circle cx="12" cy="12" r="10" />
-                                    <Path d="M22 12h-4M6 12H2M12 6V2M12 22v-4" />
-                                    <Circle cx="12" cy="12" r="3" />
-                                </Svg>
-                            </View>
-                            <View style={styles.actionTextContent}>
-                                {isFetchingLocation ? (
-                                    <>
-                                        <SkeletonItem width="60%" height={16} borderRadius={4} style={{ marginBottom: 6 }} />
-                                        <SkeletonItem width="80%" height={12} borderRadius={4} />
-                                    </>
-                                ) : (
-                                    <>
-                                        <MonoText weight="bold" color="#2D7A14">
-                                            Use current location
-                                        </MonoText>
-                                        <MonoText size="xs" color={colors.textLight} numberOfLines={1}>
-                                            {currentLocationAddress || 'Allow access to your location'}
-                                        </MonoText>
-                                    </>
-                                )}
-                            </View>
-                            {!isFetchingLocation && (
-                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                                    <Path d="M9 18l6-6-6-6" />
-                                </Svg>
-                            )}
-                        </TouchableOpacity>
-
-                        <TouchableOpacity style={styles.actionBtn} onPress={handleAddNewAddress}>
-                            <View style={styles.actionIconCircle}>
-                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2D7A14" strokeWidth="2">
-                                    <Line x1="12" y1="5" x2="12" y2="19" />
-                                    <Line x1="5" y1="12" x2="19" y2="12" />
-                                </Svg>
-                            </View>
-                            <View style={styles.actionTextContent}>
-                                <MonoText weight="bold" color="#2D7A14">Add new address</MonoText>
-                            </View>
-                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                                <Path d="M9 18l6-6-6-6" />
+                {/* Tappable overlay area + Close button */}
+                <Animated.View style={[styles.overlayArea, { opacity: overlayAnim }]}>
+                    <TouchableOpacity style={{ flex: 1, width: '100%' }} activeOpacity={1} onPress={handleClose} />
+                    <View style={styles.closeButtonContainer}>
+                        <TouchableOpacity style={styles.closeButton} onPress={handleClose} activeOpacity={0.7}>
+                            <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
+                                <Line x1="18" y1="6" x2="6" y2="18" />
+                                <Line x1="6" y1="6" x2="18" y2="18" />
                             </Svg>
                         </TouchableOpacity>
                     </View>
+                </Animated.View>
 
+                {/* Animated bottom sheet */}
+                <Animated.View style={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 10, transform: [{ translateY: slideAnim }] }]}>
+                    {/* Handle bar */}
+                    <View style={styles.handle} />
 
-                    {/* Saved Addresses Section */}
-                    <View style={styles.savedSection}>
-                        <MonoText size="s" weight="bold" color={colors.textLight} style={styles.savedLabel}>Your saved addresses</MonoText>
+                    <View style={styles.container}>
+                        <MonoText size="l" weight="bold" style={styles.title}>
+                            Select delivery location
+                        </MonoText>
 
-                        {loading ? (
-                            <View>
-                                {[1, 2, 3].map((i) => (
-                                    <View key={i} style={styles.skeletonCard}>
-                                        <View style={styles.savedIconOuter}>
-                                            <SkeletonItem width={48} height={48} borderRadius={12} />
-                                        </View>
-                                        <View style={styles.savedContent}>
-                                            <SkeletonItem width="40%" height={16} borderRadius={4} style={{ marginBottom: 8 }} />
-                                            <SkeletonItem width="80%" height={12} borderRadius={4} />
-                                        </View>
-                                    </View>
-                                ))}
+                        {/* Search Bar */}
+                        <View style={styles.searchContainer}>
+                            <View style={styles.searchInputWrapper}>
+                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <Circle cx="11" cy="11" r="8" />
+                                    <Line x1="21" y1="21" x2="16.65" y2="16.65" />
+                                </Svg>
+                                <TextInput
+                                    style={styles.searchInput}
+                                    placeholder="Search for area, street name..."
+                                    placeholderTextColor={colors.textLight}
+                                    value={searchQuery}
+                                    onChangeText={handleSearch}
+                                />
                             </View>
-                        ) : addresses.length === 0 ? (
-                            <View style={styles.noSaved}>
-                                <MonoText size="xs" color={colors.textLight}>No saved addresses found</MonoText>
-                            </View>
-                        ) : (
-                            addresses.map((address) => (
-                                <TouchableOpacity
-                                    key={address._id}
-                                    style={[
-                                        styles.savedCard,
-                                        { zIndex: optionsMenuAddressId === address._id ? 100 : 1 }
-                                    ]}
-                                    onPress={() => handleSelectSavedAddress(address)}
-                                    disabled={selectingAddressId === address._id}
-                                >
-                                    <View style={styles.savedIconOuter}>
-                                        <View style={styles.savedIconInner}>
-                                            <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D9A51F" strokeWidth="2">
-                                                <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                                                <Circle cx="12" cy="10" r="3" />
-                                            </Svg>
-                                        </View>
-                                    </View>
-                                    <View style={styles.savedContent}>
-                                        <MonoText weight="bold" size="m">{address.label || 'Other'}</MonoText>
-                                        <MonoText size="xs" color={colors.textLight} style={styles.addressLine}>
-                                            {address.addressLine1}, {address.addressLine2 ? `${address.addressLine2}, ` : ''}{address.city}
-                                        </MonoText>
-                                    </View>
+                        </View>
 
-                                    {/* Actions in top right corner */}
-                                    <View style={styles.cardActions}>
+                        {/* Search Results Overlay */}
+                        {searchQuery.length >= 3 && (
+                            <View style={styles.searchResults}>
+                                {isSearching ? (
+                                    <ActivityIndicator size="small" color={colors.primary} style={{ padding: spacing.m }} />
+                                ) : searchResults.length > 0 ? (
+                                    searchResults.map((item) => (
                                         <TouchableOpacity
-                                            style={styles.cardActionBtn}
-                                            onPress={() => toggleOptionsMenu(address._id)}
-                                            activeOpacity={0.7}
+                                            key={item.place_id}
+                                            style={styles.searchResultItem}
+                                            onPress={() => handleSelectSearchResult(item.place_id)}
                                         >
-                                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2.5">
-                                                <Circle cx="12" cy="12" r="1.2" />
-                                                <Circle cx="12" cy="5" r="1.2" />
-                                                <Circle cx="12" cy="19" r="1.2" />
-                                            </Svg>
-                                        </TouchableOpacity>
-
-                                        {optionsMenuAddressId === address._id && (
-                                            <View style={styles.optionsMenu}>
-                                                <TouchableOpacity style={styles.optionItem} onPress={() => handleEditAddress(address)}>
-                                                    <MonoText size="s" weight="bold">Edit</MonoText>
-                                                </TouchableOpacity>
-                                                <TouchableOpacity style={[styles.optionItem, styles.deleteOption]} onPress={() => handleDeleteAddress(address)}>
-                                                    <MonoText size="s" weight="bold" color="#E23744">Delete</MonoText>
-                                                </TouchableOpacity>
+                                            <View style={styles.searchResultIcon}>
+                                                <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                                                    <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                                    <Circle cx="12" cy="10" r="3" />
+                                                </Svg>
                                             </View>
-                                        )}
-                                    </View>
-                                </TouchableOpacity>
-                            ))
+                                            <View style={{ flex: 1 }}>
+                                                <MonoText weight="bold" size="s">{item.structured_formatting.main_text}</MonoText>
+                                                <MonoText size="xs" color={colors.textLight} numberOfLines={1}>
+                                                    {item.structured_formatting.secondary_text}
+                                                </MonoText>
+                                            </View>
+                                        </TouchableOpacity>
+                                    ))
+                                ) : (
+                                    <MonoText size="xs" color={colors.textLight} style={{ padding: spacing.m }}>No results found</MonoText>
+                                )}
+                            </View>
                         )}
 
+                        <ScrollView
+                            showsVerticalScrollIndicator={false}
+                            style={{ maxHeight: 450 }}
+                            contentContainerStyle={{ paddingBottom: 30 }}
+                            keyboardShouldPersistTaps="handled"
+                        >
+                            {/* Action Buttons */}
+                            <View style={styles.actionSection}>
+                                <TouchableOpacity
+                                    style={styles.actionBtn}
+                                    onPress={handleUseCurrentLocation}
+                                    disabled={isFetchingLocation}
+                                >
+                                    <View style={styles.actionIconCircle}>
+                                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={"#2D7A14"} strokeWidth="2">
+                                            <Circle cx="12" cy="12" r="10" />
+                                            <Path d="M22 12h-4M6 12H2M12 6V2M12 22v-4" />
+                                            <Circle cx="12" cy="12" r="3" />
+                                        </Svg>
+                                    </View>
+                                    <View style={styles.actionTextContent}>
+                                        {isFetchingLocation ? (
+                                            <>
+                                                <SkeletonItem width="60%" height={16} borderRadius={4} style={{ marginBottom: 6 }} />
+                                                <SkeletonItem width="80%" height={12} borderRadius={4} />
+                                            </>
+                                        ) : (
+                                            <>
+                                                <MonoText weight="bold" color="#2D7A14">
+                                                    Use current location
+                                                </MonoText>
+                                                <MonoText size="xs" color={colors.textLight} numberOfLines={1}>
+                                                    {currentLocationAddress || 'Allow access to your location'}
+                                                </MonoText>
+                                            </>
+                                        )}
+                                    </View>
+                                    {!isFetchingLocation && (
+                                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                                            <Path d="M9 18l6-6-6-6" />
+                                        </Svg>
+                                    )}
+                                </TouchableOpacity>
+
+                                <TouchableOpacity style={styles.actionBtn} onPress={handleAddNewAddress}>
+                                    <View style={styles.actionIconCircle}>
+                                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2D7A14" strokeWidth="2">
+                                            <Line x1="12" y1="5" x2="12" y2="19" />
+                                            <Line x1="5" y1="12" x2="19" y2="12" />
+                                        </Svg>
+                                    </View>
+                                    <View style={styles.actionTextContent}>
+                                        <MonoText weight="bold" color="#2D7A14">Add new address</MonoText>
+                                    </View>
+                                    <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                                        <Path d="M9 18l6-6-6-6" />
+                                    </Svg>
+                                </TouchableOpacity>
+                            </View>
+
+
+                            {/* Saved Addresses Section */}
+                            <View style={styles.savedSection}>
+                                <MonoText size="s" weight="bold" color={colors.textLight} style={styles.savedLabel}>Your saved addresses</MonoText>
+
+                                {loading ? (
+                                    <View>
+                                        {[1, 2, 3].map((i) => (
+                                            <View key={i} style={styles.skeletonCard}>
+                                                <View style={styles.savedIconOuter}>
+                                                    <SkeletonItem width={48} height={48} borderRadius={12} />
+                                                </View>
+                                                <View style={styles.savedContent}>
+                                                    <SkeletonItem width="40%" height={16} borderRadius={4} style={{ marginBottom: 8 }} />
+                                                    <SkeletonItem width="80%" height={12} borderRadius={4} />
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </View>
+                                ) : addresses.length === 0 ? (
+                                    <View style={styles.noSaved}>
+                                        <MonoText size="xs" color={colors.textLight}>No saved addresses found</MonoText>
+                                    </View>
+                                ) : (
+                                    addresses.map((address) => (
+                                        <TouchableOpacity
+                                            key={address._id}
+                                            style={[
+                                                styles.savedCard,
+                                                { zIndex: optionsMenuAddressId === address._id ? 100 : 1 }
+                                            ]}
+                                            onPress={() => handleSelectSavedAddress(address)}
+                                            disabled={selectingAddressId === address._id}
+                                        >
+                                            <View style={styles.savedIconOuter}>
+                                                <View style={styles.savedIconInner}>
+                                                    <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D9A51F" strokeWidth="2">
+                                                        <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                                        <Circle cx="12" cy="10" r="3" />
+                                                    </Svg>
+                                                </View>
+                                            </View>
+                                            <View style={styles.savedContent}>
+                                                <MonoText weight="bold" size="m">{address.label || 'Other'}</MonoText>
+                                                <MonoText size="xs" color={colors.textLight} style={styles.addressLine}>
+                                                    {address.addressLine1}, {address.addressLine2 ? `${address.addressLine2}, ` : ''}{address.city}
+                                                </MonoText>
+                                            </View>
+
+                                            {/* Actions in top right corner */}
+                                            <View style={styles.cardActions}>
+                                                <TouchableOpacity
+                                                    style={styles.cardActionBtn}
+                                                    onPress={() => toggleOptionsMenu(address._id)}
+                                                    activeOpacity={0.7}
+                                                >
+                                                    <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2.5">
+                                                        <Circle cx="12" cy="12" r="1.2" />
+                                                        <Circle cx="12" cy="5" r="1.2" />
+                                                        <Circle cx="12" cy="19" r="1.2" />
+                                                    </Svg>
+                                                </TouchableOpacity>
+
+                                                {optionsMenuAddressId === address._id && (
+                                                    <View style={styles.optionsMenu}>
+                                                        <TouchableOpacity style={styles.optionItem} onPress={() => handleEditAddress(address)}>
+                                                            <MonoText size="s" weight="bold">Edit</MonoText>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity style={[styles.optionItem, styles.deleteOption]} onPress={() => handleDeleteAddress(address)}>
+                                                            <MonoText size="s" weight="bold" color="#E23744">Delete</MonoText>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                )}
+                                            </View>
+                                        </TouchableOpacity>
+                                    ))
+                                )}
+
+                            </View>
+                        </ScrollView>
                     </View>
-                </ScrollView>
+                </Animated.View>
             </View>
-        </BlurBottomSheet>
+        </Modal>
     );
 };
 
 const styles = StyleSheet.create({
+    wrapper: {
+        flex: 1,
+    },
+    overlayArea: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        paddingBottom: 12,
+    },
+    closeButtonContainer: {
+        alignItems: 'center',
+    },
+    closeButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    content: {
+        backgroundColor: colors.white,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: spacing.l,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 10,
+    },
+    handle: {
+        width: 40,
+        height: 4,
+        backgroundColor: colors.border,
+        borderRadius: 2,
+        alignSelf: 'center',
+        marginBottom: spacing.m,
+    },
     container: {
         paddingTop: spacing.s,
     },

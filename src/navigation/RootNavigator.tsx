@@ -1,10 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Image, StatusBar, Dimensions } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
-
+import { View, StyleSheet, Image, StatusBar, Dimensions, Platform } from 'react-native';
 import { colors } from '../theme/colors';
-import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
 import { TabNavigator } from './TabNavigator';
 import { PartnerTabNavigator } from './PartnerTabNavigator';
 import { CustomerLoginScreen } from '../screens/auth/CustomerLoginScreen';
@@ -32,7 +30,7 @@ import { WishlistScreen } from '../screens/customer/WishlistScreen';
 import { TermsScreen } from '../screens/customer/Profile/TermsScreen';
 import { logger } from '../utils/logger';
 
-const Stack = createNativeStackNavigator();
+const Stack = createStackNavigator();
 
 // Maximum time to wait on splash screen before forcing navigation (3 seconds)
 const MAX_SPLASH_TIME_MS = 3000;
@@ -74,30 +72,44 @@ export const RootNavigator = () => {
 
     if (shouldShowSplash) {
         return (
-            <LinearGradient
-                colors={[colors.primary, '#FFFFFF']}
-                style={styles.splashContainer}
-            >
+            <View style={styles.splashContainer}>
                 <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
                 <Image
-                    source={require('../assets/images/logo.png')}
-                    style={styles.splashImage}
-                    resizeMode="contain"
+                    source={require('../assets/loadscreen/bgimage.jpg')}
+                    style={[StyleSheet.absoluteFill, { opacity: 0.1, transform: [{ scale: 3 }] }]}
+                    resizeMode="repeat"
                 />
-            </LinearGradient>
+                <View style={styles.logoWrapper}>
+                    <Image
+                        source={require('../assets/loadscreen/logo.png')}
+                        style={styles.splashImage}
+                        resizeMode="contain"
+                    />
+                </View>
+            </View>
         );
     }
 
     // Determine if user is a delivery partner
     const isDeliveryPartner = user?.role === 'DeliveryPartner';
 
+    const navTheme = {
+        ...DefaultTheme,
+        colors: {
+            ...DefaultTheme.colors,
+            background: colors.white,
+        },
+    };
+
     return (
-        <NavigationContainer ref={navigationRef}>
+        <NavigationContainer ref={navigationRef} theme={navTheme}>
             <Stack.Navigator
                 screenOptions={{
                     headerShown: false,
-                    animation: 'slide_from_right',
-                    contentStyle: { backgroundColor: colors.white },
+                    cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
+                    gestureEnabled: true,
+                    freezeOnBlur: false,
+                    cardStyle: { backgroundColor: colors.white },
                 }}
             >
                 {isAuthenticated ? (
@@ -117,7 +129,7 @@ export const RootNavigator = () => {
                             <Stack.Screen name="AddressSelection" component={AddressSelectionScreen} />
                             <Stack.Screen name="AddAddress" component={AddAddressScreen} />
                             <Stack.Screen name="AddAddressMap" component={AddAddressScreen} />
-                            <Stack.Screen name="Checkout" component={CheckoutScreen} />
+                            <Stack.Screen name="Checkout" component={CheckoutScreen} options={{ gestureEnabled: false }} />
                             <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
                             <Stack.Screen name="Categories" component={CategoriesScreen} />
                             <Stack.Screen name="Subcategories" component={SubcategoriesScreen} />
@@ -149,12 +161,19 @@ export const RootNavigator = () => {
 const styles = StyleSheet.create({
     splashContainer: {
         flex: 1,
+        backgroundColor: '#FF4700',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    logoWrapper: {
+        width: '80%',
+        aspectRatio: 1,
         justifyContent: 'center',
         alignItems: 'center',
     },
     splashImage: {
-        width: 200,
-        height: 200,
+        width: '100%',
+        height: '100%',
     },
 });
 

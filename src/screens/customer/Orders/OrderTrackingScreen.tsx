@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Linking, Platform, ScrollView, Image } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Linking, Platform, ScrollView, Image, StatusBar } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing, interpolate } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -544,6 +544,7 @@ export const OrderTrackingScreen = () => {
 
     return (
         <View style={styles.container}>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
             {/* Header */}
             <View style={[styles.header, { paddingTop: insets.top }]}>
                 <BlurView
