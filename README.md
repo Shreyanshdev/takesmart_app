@@ -1,7 +1,7 @@
 <div align="center">
   <img src="public/logo.png" width="160" alt="TakeSmart Logo" />
   <h1>TakeSmart</h1>
-  <p><strong>A Premium Dairy Delivery & Subscription Management Ecosystem</strong></p>
+  <p><strong>A Premium Hyperlocal E-commerce & Quick Commerce Ecosystem</strong></p>
 
   <p>
     <img src="https://img.shields.io/badge/React_Native-v0.81.4-61DAFB?logo=react&logoColor=black" alt="React Native" />
@@ -15,12 +15,12 @@
 
 ## 📱 Project Overview
 
-TakeSmart is a high-performance, real-time mobile application built with React Native. It provides a seamless bridge between customers and dairy branches, offering both one-time orders and recurring subscriptions. The platform is built with a dual-app architecture (Customer and Delivery Partner) integrated into a single codebase with role-based routing.
+TakeSmart is a high-performance, real-time mobile application built with React Native. It provides a seamless bridge between customers and local store hubs, offering both instant one-time orders and recurring subscription models for daily essentials. The platform is built with a dual-app architecture (Customer and Delivery Partner) integrated into a single codebase with role-based routing.
 
 ### Key Capabilities
 - **Location-Based Discovery**: Automatically detects the nearest branch and serves inventory based on the customer's coordinates.
 - **Real-Time Tracking**: Live GPS tracking of delivery partners via Socket.io for precise ETAs.
-- **Subscription Engine**: Manage recurring daily deliveries (milk, curd, etc.) with automated scheduling.
+- **Subscription Engine**: Manage recurring daily deliveries for essentials (milk, bread, groceries, etc.) with automated scheduling.
 - **Dual Confirmation**: Secure delivery verification where both partner and customer confirm the handover.
 - **Premium UI**: Modern glassmorphism design system with smooth Reanimated transitions.
 
@@ -62,7 +62,7 @@ TakeSmart is a high-performance, real-time mobile application built with React N
 
 #### Discovery & Shopping
 | Home Dashboard | Categories | Browse Products |
-| :---: | : :---: | :---: |
+| :---: | :---: | :---: |
 | <img src="public/customer_home.png" width="220" /> | <img src="public/customer_categories.png" width="220" /> | <img src="public/customer_browse.png" width="220" /> |
 *Dynamic and intuitive product discovery. The home dashboard features location-aware branch selection, category-based browsing, and personalized product recommendations powered by a high-performance caching layer.*
 
@@ -242,6 +242,6 @@ backend/src/
 ---
 
 <div align="center">
-  <p><strong>Developed with passion for the next generation of delivery services.</strong></p>
+  <p><strong>Developed with passion for the next generation of quick commerce services.</strong></p>
   <p>© 2026 TakeSmart Platform</p>
 </div>
