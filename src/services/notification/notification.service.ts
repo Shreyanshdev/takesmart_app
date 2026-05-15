@@ -91,7 +91,7 @@ const displayNotification = async (
             data,
             android: {
                 channelId,
-                smallIcon: 'ic_notification', // Make sure this icon exists in android/app/src/main/res
+                smallIcon: 'ic_launcher', // Fallback to app icon since ic_notification doesn't exist
                 pressAction: {
                     id: 'default',
                 },

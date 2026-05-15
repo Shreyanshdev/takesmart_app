@@ -53,6 +53,14 @@ export const AddressSelectionScreen = () => {
     const [loading, setLoading] = useState(true);
     const fadeAnim = React.useRef(new Animated.Value(0)).current;
 
+    const safeGoBack = React.useCallback(() => {
+        if (navigation.canGoBack()) {
+            navigation.goBack();
+        } else {
+            navigation.navigate('MainTabs');
+        }
+    }, [navigation]);
+
     useEffect(() => {
         if (loading) {
             Animated.timing(fadeAnim, {
@@ -148,7 +156,7 @@ export const AddressSelectionScreen = () => {
     return (
         <View style={styles.container}>
             <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                <TouchableOpacity onPress={safeGoBack} style={styles.backBtn}>
                     <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <Path d="M19 12H5M12 19l-7-7 7-7" />
                     </Svg>

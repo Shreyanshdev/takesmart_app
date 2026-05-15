@@ -3,7 +3,7 @@ import { View, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Platform, An
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Svg, { Path, Circle, Rect, G } from 'react-native-svg';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../../components/shared/SafeBlurView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MonoText } from '../../../components/shared/MonoText';
 import { colors } from '../../../theme/colors';

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     View, StyleSheet, TouchableOpacity, Dimensions, KeyboardAvoidingView,
     Platform, Alert, TextInput, ActivityIndicator, Linking, FlatList,
-    Image, StatusBar, ScrollView, PermissionsAndroid
+    Image, StatusBar, ScrollView, PermissionsAndroid, BackHandler
 } from 'react-native';
 import MapView, { PROVIDER_DEFAULT, Region } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -106,6 +106,49 @@ export const AddAddressScreen = () => {
     const [existingAddresses, setExistingAddresses] = useState<any[]>([]);
     const [focusedField, setFocusedField] = useState<string | null>(null);
 
+    const safeGoBack = useCallback(() => {
+        if (navigation.canGoBack()) {
+            navigation.goBack();
+        } else {
+            navigation.navigate('MainTabs');
+        }
+    }, [navigation]);
+
+    const handleBackAction = useCallback(() => {
+        if (flowState === 'search') {
+            setFlowState(currentLocation ? 'map' : 'initial');
+            return true;
+        }
+        if (flowState === 'map' || flowState === 'confirm') {
+            if (isEditMode) {
+                safeGoBack();
+            } else {
+                setFlowState('initial');
+            }
+            return true;
+        }
+        if (flowState === 'form') {
+            if (isEditMode) {
+                safeGoBack();
+            } else {
+                setFlowState('confirm');
+            }
+            return true;
+        }
+
+        // initial state or other
+        safeGoBack();
+        return true;
+    }, [flowState, currentLocation, isEditMode, safeGoBack]);
+
+    useEffect(() => {
+        const backHandler = BackHandler.addEventListener(
+            'hardwareBackPress',
+            handleBackAction,
+        );
+        return () => backHandler.remove();
+    }, [handleBackAction]);
+
     const selectedPlaceId = route.params?.selectedPlaceId;
 
     // Auto-check location on mount
@@ -117,10 +160,21 @@ export const AddAddressScreen = () => {
 
     const checkLocationAutomatically = async () => {
         try {
+            // Only auto-check if permissions are already granted to avoid interrupting the user
+            let hasPermission = false;
+            if (Platform.OS === 'android') {
+                hasPermission = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+            } else {
+                // For iOS, we can attempt a silent check or just proceed as iOS handles this better
+                hasPermission = true;
+            }
+
+            if (!hasPermission) return;
+
             // Silently check if location is available
             const location = await GetLocation.getCurrentPosition({
                 enableHighAccuracy: true,
-                timeout: 5000,
+                timeout: 10000,
             });
 
             if (location) {
@@ -143,8 +197,8 @@ export const AddAddressScreen = () => {
                 }, 100);
             }
         } catch (error) {
-            // Silently fail, user can still click manually
-            logger.debug('Auto-location check failed or timed out', error);
+            // Silently fail as intended for "Automatic" check
+            logger.debug('Auto-location check skipped or failed', error);
         }
     };
 
@@ -171,76 +225,96 @@ export const AddAddressScreen = () => {
             const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${ENV.GOOGLE_MAPS_API_KEY}`;
             const res = await axios.get(url);
 
-            if (res.data.status === 'OK' && res.data.results?.length > 0) {
-                const result = res.data.results[0];
+            if (res.data.status !== 'OK') {
+                if (res.data.status === 'REQUEST_DENIED') {
+                    logger.error('Google Maps API Error: Request Denied. Check API key restrictions.');
+                }
+                setIsFetchingAddress(false);
+                return;
+            }
+
+            if (res.data.results && res.data.results.length > 0) {
+                // Find the best result (usually index 0, but we look for one with components)
+                const result = res.data.results.find((r: any) =>
+                    r.address_components?.length > 3
+                ) || res.data.results[0];
+
                 const components = result.address_components;
 
-                let streetNumber = '';
-                let subpremise = '';
-                let premise = '';
-                let route = '';
-                let sublocality = '';
-                let neighborhood = '';
-                let locality = '';
-                let city = '';
-                let state = '';
-                let zipCode = '';
-                let poi = '';
+                let streetNumber = '', subpremise = '', premise = '', route = '';
+                let sublocality = '', neighborhood = '', city = '', state = '', zipCode = '', poi = '';
 
                 components.forEach((c: any) => {
-                    if (c.types.includes('street_number')) streetNumber = c.long_name;
-                    if (c.types.includes('subpremise')) subpremise = c.long_name;
-                    if (c.types.includes('premise')) premise = c.long_name;
-                    if (c.types.includes('route')) route = c.long_name;
-                    if (c.types.includes('sublocality_level_1') || c.types.includes('sublocality')) sublocality = c.long_name;
-                    if (c.types.includes('neighborhood')) neighborhood = c.long_name;
-                    if (c.types.includes('locality')) city = c.long_name;
-                    if (c.types.includes('administrative_area_level_1')) state = c.long_name;
-                    if (c.types.includes('postal_code')) zipCode = c.long_name;
-                    if (c.types.includes('point_of_interest') || c.types.includes('establishment')) poi = c.long_name;
+                    const types = c.types;
+                    if (types.includes('street_number')) streetNumber = c.long_name;
+                    if (types.includes('subpremise')) subpremise = c.long_name;
+                    if (types.includes('premise')) premise = c.long_name;
+                    if (types.includes('route')) route = c.long_name;
+
+                    if (types.includes('sublocality_level_1') || types.includes('sublocality')) {
+                        sublocality = c.long_name;
+                    } else if (types.includes('sublocality_level_2')) {
+                        if (!sublocality) sublocality = c.long_name;
+                        else neighborhood = c.long_name;
+                    } else if (types.includes('sublocality_level_3') && !neighborhood) {
+                        neighborhood = c.long_name;
+                    }
+
+                    if (types.includes('neighborhood') && !neighborhood) neighborhood = c.long_name;
+                    if (types.includes('locality')) city = c.long_name;
+                    else if (types.includes('administrative_area_level_2') && !city) city = c.long_name;
+
+                    if (types.includes('administrative_area_level_1')) state = c.long_name;
+                    if (types.includes('postal_code')) zipCode = c.long_name;
+                    if (types.includes('point_of_interest') || types.includes('establishment')) poi = c.long_name;
                 });
 
-                // Construct Prefilled Values
-                // 1. House/Flat: Combine Flat/Suite No and Street/Building No
-                let prefilledHouse = [subpremise, streetNumber].filter(Boolean).join(', ');
+                // --- SMART PARSING FOR INDIAN ADDRESSES ---
 
-                // Heuristic: If house number is empty but premise starts with digit, use premise as house number
+                // 1. House/Flat Logic
+                let hf = [subpremise, streetNumber].filter(Boolean).join(', ');
                 let premiseUsedInHouse = false;
-                if (!prefilledHouse && premise && /^\d/.test(premise)) {
-                    prefilledHouse = premise;
-                    premiseUsedInHouse = true;
+
+                if (!hf) {
+                    if (premise && /^\d/.test(premise)) {
+                        hf = premise;
+                        premiseUsedInHouse = true;
+                    } else if (result.formatted_address) {
+                        const firstPart = result.formatted_address.split(',')[0].trim();
+                        // If the first part looks like a house number (contains digits, not too long)
+                        if (/\d/.test(firstPart) && firstPart.length < 15 && !firstPart.includes(city)) {
+                            hf = firstPart;
+                        }
+                    }
                 }
 
-                // 2. Apartment/Area: Combine Premise/POI, Street and Sublocality
+                // 2. Road/Area Logic
                 const areaParts = [];
-                // Only use premise in area if not used in house
                 if (premise && !premiseUsedInHouse) areaParts.push(premise);
-                // Use POI if distinct from premise
                 if (poi && poi !== premise) areaParts.push(poi);
-
                 if (route) areaParts.push(route);
-                if (neighborhood) areaParts.push(neighborhood);
                 if (sublocality) areaParts.push(sublocality);
+                if (neighborhood && neighborhood !== sublocality) areaParts.push(neighborhood);
 
-                const prefilledArea = areaParts.filter(Boolean).join(', ');
+                const finalArea = areaParts.filter(Boolean).join(', ');
 
-                // Best name for location header
-                const placeName = premise || poi || sublocality || neighborhood || route || city;
+                // 3. Header Display Logic
+                const displayTitle = premise || poi || sublocality || neighborhood || route || city || 'Selected Location';
 
+                // Update All States Atomically
                 setExtractedAddress({
-                    name: placeName,
+                    name: displayTitle,
                     fullAddress: result.formatted_address,
                 });
 
-                // Update Form States
-                setHouseFlat(prefilledHouse);
-                setApartmentArea(prefilledArea);
-                setCity(city);
-                setState(state);
-                setZipCode(zipCode);
+                setHouseFlat(hf);
+                setApartmentArea(finalArea);
+                setCity(city || '');
+                setState(state || '');
+                setZipCode(zipCode || '');
             }
         } catch (error: any) {
-            logger.error('Geocoding error', error);
+            logger.error('Geocoding fetch failed', error);
         } finally {
             setIsFetchingAddress(false);
         }
@@ -450,7 +524,7 @@ export const AddAddressScreen = () => {
     const handleSearch = useCallback(async (query: string) => {
         setSearchQuery(query);
         if (query.length < 2) {
-            setSearchResults([]);
+            searchResults.length > 0 && setSearchResults([]);
             return;
         }
 
@@ -470,7 +544,7 @@ export const AddAddressScreen = () => {
         } finally {
             setIsSearching(false);
         }
-    }, []);
+    }, [searchResults]);
 
     // Select place from search results
     const handleSelectPlace = async (placeId: string) => {
@@ -638,7 +712,7 @@ export const AddAddressScreen = () => {
                     ],
                 });
             } else {
-                navigation.goBack();
+                safeGoBack();
             }
         } catch (error) {
             logger.error('Failed to save address', error);
@@ -666,7 +740,7 @@ export const AddAddressScreen = () => {
             {/* Back Button */}
             <TouchableOpacity
                 style={[styles.initialBackBtn, { top: insets.top + 12 }]}
-                onPress={() => navigation.goBack()}
+                onPress={handleBackAction}
             >
                 <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
                     <Path d="M19 12H5M12 19l-7-7 7-7" />
@@ -728,7 +802,7 @@ export const AddAddressScreen = () => {
 
             {/* Header */}
             <View style={styles.searchHeader}>
-                <TouchableOpacity onPress={() => setFlowState(flowState === 'search' && currentLocation ? 'map' : 'initial')} style={styles.searchBackBtn}>
+                <TouchableOpacity onPress={handleBackAction} style={styles.searchBackBtn}>
                     <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
                         <Path d="M19 12H5M12 19l-7-7 7-7" />
                     </Svg>
@@ -736,24 +810,33 @@ export const AddAddressScreen = () => {
                 <MonoText size="l" weight="bold" style={{ flex: 1 }}>Select Your Location</MonoText>
             </View>
 
-            {/* Search Input */}
-            <View style={styles.searchInputContainer}>
-                <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search location..."
-                    placeholderTextColor={colors.textLight}
-                    value={searchQuery}
-                    onChangeText={handleSearch}
-                    autoFocus
-                />
-                {searchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); }}>
-                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
-                            <Line x1="18" y1="6" x2="6" y2="18" />
-                            <Line x1="6" y1="6" x2="18" y2="18" />
-                        </Svg>
-                    </TouchableOpacity>
-                )}
+            {/* Search Input Container - Perfectly Matched Design */}
+            <View style={styles.searchInputOuter}>
+                <View style={styles.searchFieldPill}>
+                    <TextInput
+                        style={styles.searchInputPremium}
+                        placeholder="Search an area or address"
+                        placeholderTextColor={colors.textLight}
+                        value={searchQuery}
+                        onChangeText={handleSearch}
+                        autoFocus
+                        selectionColor={colors.primary}
+                    />
+                    <View style={styles.searchIconRight}>
+                        {searchQuery.length > 0 ? (
+                            <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); }}>
+                                <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2.5">
+                                    <Path d="M18 6L6 18M6 6l12 12" />
+                                </Svg>
+                            </TouchableOpacity>
+                        ) : (
+                            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="2">
+                                <Circle cx="11" cy="11" r="8" />
+                                <Path d="M21 21l-4.35-4.35" />
+                            </Svg>
+                        )}
+                    </View>
+                </View>
             </View>
 
             {/* Results */}
@@ -844,7 +927,7 @@ export const AddAddressScreen = () => {
                 {/* Header with Search */}
                 <View style={[styles.mapHeader, { paddingTop: insets.top + 8 }]}>
                     <TouchableOpacity
-                        onPress={() => navigation.goBack()}
+                        onPress={handleBackAction}
                         style={styles.mapBackBtn}
                     >
                         <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2">
@@ -863,73 +946,101 @@ export const AddAddressScreen = () => {
                     </TouchableOpacity>
                 </View>
 
-                {/* Current Location Button */}
-                <TouchableOpacity
-                    style={styles.currentLocationPill}
-                    onPress={handleCurrentLocation}
-                    disabled={isFetchingLocation}
-                >
-                    {isFetchingLocation ? (
-                        <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                        <>
-                            <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2">
-                                <Circle cx="12" cy="12" r="4" fill={colors.primary} />
-                                <Path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
-                            </Svg>
-                            <MonoText size="s" style={{ marginLeft: 6 }}>Current location</MonoText>
-                        </>
-                    )}
-                </TouchableOpacity>
+                {/* Bottom UI Wrapper: Holds both the floating Current Location pill and the Address Sheet */}
+                <View style={[styles.bottomUIContainer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
 
-                {/* Bottom Sheet */}
-                <View style={[styles.mapBottomSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-                    {isConfirmState ? (
-                        <>
-                            <MonoText size="s" color={colors.textLight}>Order will be delivered here</MonoText>
-                            <View style={styles.addressRow}>
-                                <Svg width="24" height="24" viewBox="0 0 24 24" fill={colors.primary}>
-                                    <Path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-                                    <Circle cx="12" cy="9" r="2.5" fill="white" />
+                    {/* Current Location Button - Automatically rests just above the sheet */}
+                    <TouchableOpacity
+                        style={styles.currentLocationPill}
+                        onPress={handleCurrentLocation}
+                        disabled={isFetchingLocation}
+                    >
+                        {isFetchingLocation ? (
+                            <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                            <>
+                                <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <Circle cx="12" cy="12" r="4" />
+                                    <Path d="M12 2v2" />
+                                    <Path d="M12 20v2" />
+                                    <Path d="M2 12h2" />
+                                    <Path d="M20 12h2" />
                                 </Svg>
-                                <View style={{ flex: 1, marginLeft: 10 }}>
-                                    <MonoText size="l" weight="bold">{extractedAddress.name || 'Selected Location'}</MonoText>
-                                    <MonoText size="s" color={colors.textLight} numberOfLines={2}>{extractedAddress.fullAddress}</MonoText>
+                                <MonoText size="s" weight="medium" style={{ marginLeft: 6, color: colors.text }}>Current location</MonoText>
+                            </>
+                        )}
+                    </TouchableOpacity>
+
+                    {/* Bottom Address Sheet */}
+                    <View style={styles.mapBottomSheet}>
+                        {isConfirmState ? (
+                            <>
+                                <MonoText size="s" color={colors.textLight} style={{ marginBottom: 12 }}>Order will be delivered here</MonoText>
+                                <View style={styles.addressRow}>
+                                    <View style={styles.addressPinIcon}>
+                                        <Svg width="20" height="20" viewBox="0 0 24 24" fill={colors.primary}>
+                                            <Path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+                                            <Circle cx="12" cy="9" r="2.5" fill="white" />
+                                        </Svg>
+                                    </View>
+                                    <View style={{ flex: 1, marginLeft: 12 }}>
+                                        {isFetchingAddress ? (
+                                            <>
+                                                <SkeletonItem width={120} height={20} borderRadius={6} style={{ marginBottom: 8 }} />
+                                                <SkeletonItem width="100%" height={14} borderRadius={4} style={{ marginBottom: 4 }} />
+                                                <SkeletonItem width="80%" height={14} borderRadius={4} />
+                                            </>
+                                        ) : (
+                                            <>
+                                                <MonoText size="l" weight="bold" style={{ marginBottom: 4 }}>{extractedAddress.name || 'Selected Location'}</MonoText>
+                                                <MonoText size="s" color={colors.textLight} numberOfLines={2} style={{ lineHeight: 18 }}>{extractedAddress.fullAddress}</MonoText>
+                                            </>
+                                        )}
+                                    </View>
                                 </View>
-                            </View>
-                            {distanceText && (
-                                <View style={styles.distanceBadge}>
-                                    <MonoText size="s" color="#D97706">This is {distanceText} away from your current location</MonoText>
+                                {distanceText && (
+                                    <View style={styles.distanceBadge}>
+                                        <MonoText size="s" color="#D97706">This is {distanceText} away from your current location</MonoText>
+                                    </View>
+                                )}
+                                <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmProceed}>
+                                    <MonoText weight="bold" color="white" size="m">Confirm & proceed</MonoText>
+                                </TouchableOpacity>
+                            </>
+                        ) : (
+                            <>
+                                <MonoText size="s" color={colors.textLight} style={{ marginBottom: 12 }}>Place the pin at exact delivery location</MonoText>
+                                <View style={styles.addressRow}>
+                                    <View style={styles.addressPinIcon}>
+                                        <Svg width="20" height="20" viewBox="0 0 24 24" fill={colors.primary}>
+                                            <Path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+                                            <Circle cx="12" cy="9" r="2.5" fill="white" />
+                                        </Svg>
+                                    </View>
+                                    <View style={{ flex: 1, marginLeft: 12 }}>
+                                        {isFetchingAddress ? (
+                                            <>
+                                                <SkeletonItem width={120} height={20} borderRadius={6} style={{ marginBottom: 8 }} />
+                                                <SkeletonItem width="100%" height={14} borderRadius={4} style={{ marginBottom: 4 }} />
+                                                <SkeletonItem width="80%" height={14} borderRadius={4} />
+                                            </>
+                                        ) : (
+                                            <>
+                                                <MonoText size="l" weight="bold" style={{ marginBottom: 4 }}>{extractedAddress.name || 'Move map to select'}</MonoText>
+                                                <MonoText size="s" color={colors.textLight} numberOfLines={2} style={{ lineHeight: 18 }}>{extractedAddress.fullAddress}</MonoText>
+                                            </>
+                                        )}
+                                    </View>
                                 </View>
-                            )}
-                            <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmProceed}>
-                                <MonoText weight="bold" color="white" size="m">Confirm & proceed</MonoText>
-                            </TouchableOpacity>
-                        </>
-                    ) : (
-                        <>
-                            <MonoText size="s" color={colors.textLight}>Place the pin at exact delivery location</MonoText>
-                            <View style={styles.addressRow}>
-                                <Svg width="24" height="24" viewBox="0 0 24 24" fill={colors.primary}>
-                                    <Path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-                                    <Circle cx="12" cy="9" r="2.5" fill="white" />
-                                </Svg>
-                                <View style={{ flex: 1, marginLeft: 10 }}>
-                                    <MonoText size="l" weight="bold">{extractedAddress.name || 'Move map to select'}</MonoText>
-                                    <MonoText size="s" color={colors.textLight} numberOfLines={2}>{extractedAddress.fullAddress}</MonoText>
-                                </View>
-                            </View>
-                            <View style={styles.zoomHint}>
-                                <MonoText size="s" color="#DC2626">Zoom in to place the pin at exact delivery location</MonoText>
-                            </View>
-                            <TouchableOpacity
-                                style={styles.confirmBtn}
-                                onPress={() => setFlowState('confirm')}
-                            >
-                                <MonoText weight="bold" color="white" size="m">Confirm Location</MonoText>
-                            </TouchableOpacity>
-                        </>
-                    )}
+                                <TouchableOpacity
+                                    style={styles.confirmBtn}
+                                    onPress={() => setFlowState('confirm')}
+                                >
+                                    <MonoText weight="bold" color="white" size="m">Confirm Location</MonoText>
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </View>
                 </View>
             </View>
         );
@@ -982,8 +1093,8 @@ export const AddAddressScreen = () => {
                 <View style={styles.formFields}>
                     {/* Info Banner */}
                     <View style={styles.infoBanner}>
-                        <MonoText size="s" color={colors.primary}>
-                            A detailed address will help our Delivery Partner reach your doorstep easily
+                        <MonoText size="xs" color="#4B5563" style={styles.infoBannerText}>
+                            A detailed address helps our Delivery Partner reach your doorstep <MonoText size="xs" weight="bold" color={colors.primary}>easily & quickly</MonoText>.
                         </MonoText>
                     </View>
 
@@ -1058,7 +1169,7 @@ export const AddAddressScreen = () => {
                             onFocus={() => setFocusedField('directions')}
                             onBlur={() => setFocusedField(null)}
                         />
-                        <MonoText size="xs" color={colors.textLight} style={{ marginTop: 4 }}>{directions.length}/200</MonoText>
+                        <MonoText size="xs" color={colors.textLight} style={{ marginTop: 8 }}>{directions.length}/200</MonoText>
                     </View>
 
                     {/* Label Selector */}
@@ -1294,7 +1405,7 @@ const styles = StyleSheet.create({
         }),
     },
     mapBlur: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(255,255,255,0.7)',
         flex: 1,
     },
@@ -1372,20 +1483,37 @@ const styles = StyleSheet.create({
             },
         }),
     },
-    searchInputContainer: {
+    searchInputOuter: {
+        paddingHorizontal: 16,
+        paddingBottom: 20,
+        backgroundColor: colors.white,
+    },
+    searchFieldPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginHorizontal: 16,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        backgroundColor: '#F3F4F6',
-        borderRadius: 12,
+        backgroundColor: colors.white,
+        borderRadius: 30,
+        paddingHorizontal: 20,
+        height: 56,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+        elevation: 6,
+        borderWidth: 1,
+        borderColor: '#F9FAFB',
     },
-    searchInput: {
+    searchInputPremium: {
         flex: 1,
         fontSize: 16,
-        fontFamily: 'monospace',
         color: colors.text,
+        paddingVertical: 12,
+        fontWeight: '400',
+    },
+    searchIconRight: {
+        marginLeft: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     searchResultsContainer: {
         flex: 1,
@@ -1478,43 +1606,44 @@ const styles = StyleSheet.create({
             },
         }),
     },
-    currentLocationPill: {
+    bottomUIContainer: {
         position: 'absolute',
-        bottom: 220,
-        alignSelf: 'center',
+        bottom: 0,
+        left: 16,   // Adds margin from the left edge
+        right: 16,
+        alignItems: 'center', // Centers the floating pill above the sheet
+    },
+    currentLocationPill: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: colors.white,
-        borderRadius: 20,
+        borderRadius: 24,
         paddingHorizontal: 16,
-        paddingVertical: 10,
+        paddingVertical: 12,
+        marginBottom: 16, // Perfect auto-adjusting gap from bottom sheet
         ...Platform.select({
             ios: {
                 shadowColor: '#000',
                 shadowOffset: { width: 0, height: 2 },
                 shadowOpacity: 0.1,
-                shadowRadius: 4,
+                shadowRadius: 6,
             },
             android: {
-                elevation: 3,
+                elevation: 4,
             },
         }),
     },
     mapBottomSheet: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
+        width: '100%',
         backgroundColor: colors.white,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        padding: 20,
+        borderRadius: 24, // Rounds ALL corners to make it a floating box
+        padding: 24,
         ...Platform.select({
             ios: {
                 shadowColor: '#000',
-                shadowOffset: { width: 0, height: -4 },
-                shadowOpacity: 0.1,
-                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 4 }, // Changed to positive 4 so the shadow drops down
+                shadowOpacity: 0.12,
+                shadowRadius: 12,
             },
             android: {
                 elevation: 8,
@@ -1524,7 +1653,10 @@ const styles = StyleSheet.create({
     addressRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        marginVertical: 12,
+        marginBottom: 16,
+    },
+    addressPinIcon: {
+        marginTop: 2,
     },
     distanceBadge: {
         backgroundColor: '#FEF3C7',
@@ -1542,7 +1674,7 @@ const styles = StyleSheet.create({
     },
     confirmBtn: {
         backgroundColor: colors.primary,
-        borderRadius: 12,
+        borderRadius: 100, // Deep pill shape
         paddingVertical: 16,
         alignItems: 'center',
     },
@@ -1594,21 +1726,25 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     formLabel: {
-        marginBottom: 8,
+        marginBottom: 10,
+        marginLeft: 4,
         letterSpacing: 0.5,
     },
     formInput: {
         borderWidth: 1,
         borderColor: '#E5E7EB',
-        borderRadius: 8,
-        paddingHorizontal: 16,
+        borderRadius: 24, // Deep pill shape
+        paddingHorizontal: 20,
         paddingVertical: 14,
         fontSize: 16,
         fontFamily: 'monospace',
         color: colors.text,
+        backgroundColor: '#FAFAFA', // Slight premium grey bg
     },
     formTextarea: {
-        height: 80,
+        height: 100,
+        borderRadius: 20, // Slightly less aggressive pill for text area
+        paddingTop: 16,
         textAlignVertical: 'top',
     },
     labelGrid: {
@@ -1648,7 +1784,7 @@ const styles = StyleSheet.create({
     },
     saveBtn: {
         backgroundColor: colors.primary,
-        borderRadius: 12,
+        borderRadius: 100, // Deep pill shape
         paddingVertical: 16,
         alignItems: 'center',
     },
@@ -1658,37 +1794,45 @@ const styles = StyleSheet.create({
     phoneHint: {
         marginTop: 8,
         backgroundColor: '#F3F4F6',
-        borderRadius: 8,
-        padding: 10,
-    },
-    // New styles for redesigned form
-    infoBanner: {
-        backgroundColor: `${colors.primary}10`,
-        borderRadius: 8,
+        borderRadius: 12,
         padding: 12,
-        marginBottom: 20,
-        borderLeftWidth: 3,
-        borderLeftColor: colors.primary,
+    },
+    infoBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: `${colors.primary}0A`, // Super subtle 10% opacity tint
+        borderRadius: 16,                       // Smooth, modern curves
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: `${colors.primary}20`,     // Light border to frame it cleanly
+    },
+    infoBannerText: {
+        flex: 1,
+        lineHeight: 18,
     },
     formInputFocused: {
         borderColor: colors.primary,
         borderWidth: 2,
+        backgroundColor: colors.white,
     },
     phoneInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
         borderColor: '#E5E7EB',
-        borderRadius: 8,
+        borderRadius: 24, // Deep pill shape
         overflow: 'hidden',
+        backgroundColor: '#FAFAFA',
     },
     phoneInputContainerFocused: {
         borderColor: colors.primary,
         borderWidth: 2,
+        backgroundColor: colors.white,
     },
     phonePrefix: {
-        backgroundColor: '#F3F4F6',
-        paddingHorizontal: 16,
+        paddingHorizontal: 20,
         paddingVertical: 14,
         borderRightWidth: 1,
         borderRightColor: '#E5E7EB',

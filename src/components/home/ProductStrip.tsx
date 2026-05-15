@@ -1,6 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Platform } from 'react-native';
-import FastImage from 'react-native-fast-image';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Platform, Image } from 'react-native';
 import { MonoText } from '../shared/MonoText';
 import { SectionHeader } from './SectionHeader';
 import { colors } from '../../theme/colors';
@@ -133,10 +132,10 @@ export const StripProductCard = ({
                 {/* Image */}
                 <View style={styles.imageContainer}>
                     {image ? (
-                        <FastImage
-                            source={{ uri: image, priority: FastImage.priority.normal }}
+                        <Image
+                            source={{ uri: image }}
                             style={styles.productImage}
-                            resizeMode={FastImage.resizeMode.contain}
+                            resizeMode="contain"
                         />
                     ) : (
                         <View style={[styles.productImage, styles.placeholderImage]}>
@@ -318,8 +317,8 @@ const styles = StyleSheet.create({
     },
     addButtonTopRight: {
         position: 'absolute',
-        top: -6,
-        right: -6,
+        top: 2, // Moved inside bounds for New Architecture touch safety
+        right: 2,
         backgroundColor: colors.white,
         paddingHorizontal: 12,
         height: 28,
@@ -343,8 +342,8 @@ const styles = StyleSheet.create({
     },
     qtyContainerTopRight: {
         position: 'absolute',
-        top: -6,
-        right: -6,
+        top: 2, // Moved inside bounds for New Architecture touch safety
+        right: 2,
         backgroundColor: colors.primary,
         height: 32,
         borderRadius: 16,
@@ -373,7 +372,7 @@ const styles = StyleSheet.create({
     },
     floatingVariantPill: {
         position: 'absolute',
-        bottom: -8,
+        bottom: 2, // Moved inside bounds for New Architecture touch safety
         backgroundColor: colors.white,
         paddingHorizontal: 12,
         paddingVertical: 4,

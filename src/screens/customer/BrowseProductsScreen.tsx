@@ -13,7 +13,7 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../components/shared/SafeBlurView';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
@@ -211,7 +211,6 @@ export const BrowseProductsScreen = () => {
     const totalItemsCount = items.reduce((sum, item) => sum + item.quantity, 0);
     const cartTotal = getTotalPrice();
 
-    const FlashListOptimized = FlashList as any;
 
     return (
         <View style={styles.container}>
@@ -273,22 +272,21 @@ export const BrowseProductsScreen = () => {
                 </View>
             ) : (
                 <View style={{ flex: 1, paddingHorizontal: 6 }}>
-                    <FlashListOptimized
-                        data={products}
-                        keyExtractor={(item: Product, index: number) => `${item._id}_${item.inventoryId || index}`}
-                        numColumns={2}
-                        contentContainerStyle={[
-                            styles.listContent,
-                            {
-                                paddingBottom: totalItemsCount > 0 ? 120 : 40,
-                                // paddingTop: insets.top + 60 + 12 // Moved to ListHeaderComponent
-                            }
-                        ]}
-                        renderItem={renderProductCard}
-                        onEndReached={loadMore}
-                        onEndReachedThreshold={0.5}
-                        showsVerticalScrollIndicator={false}
-                        estimatedItemSize={280}
+                        <FlashList
+                            data={products}
+                            keyExtractor={(item: Product, index: number) => `${item._id}_${item.inventoryId || index}`}
+                            numColumns={2}
+                            contentContainerStyle={[
+                                styles.listContent,
+                                {
+                                    paddingBottom: totalItemsCount > 0 ? 120 : 40,
+                                    // paddingTop: insets.top + 60 + 12 // Moved to ListHeaderComponent
+                                }
+                            ]}
+                            renderItem={renderProductCard}
+                            onEndReached={loadMore}
+                            onEndReachedThreshold={0.5}
+                            showsVerticalScrollIndicator={false}
                         ListHeaderComponent={() => (
                             <View style={{ height: 12 }} />
                         )}

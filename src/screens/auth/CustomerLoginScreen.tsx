@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../components/shared/SafeBlurView';
 import LinearGradient from 'react-native-linear-gradient';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
@@ -62,24 +62,31 @@ export const CustomerLoginScreen = () => {
     return (
         <View style={styles.container}>
 
-            {/* Background Layer - Branded Theme */}
-            <LinearGradient
-                colors={['#DEFCE1', '#FFFFFF']}
-                style={StyleSheet.absoluteFill}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 0.6 }}
-            />
-            <View style={styles.patternContainer}>
-                <Image
-                    source={require('../../assets/loadscreen/bgimage.jpg')}
-                    style={[styles.patternImage, { opacity: 0.1 }]}
-                    resizeMode="repeat"
+            {/* Background Layer */}
+            <View style={[StyleSheet.absoluteFill, { zIndex: -1 }]}>
+                {/* 1. Base Top Color Gradient */}
+                <LinearGradient
+                    colors={['#DEFCE1', 'rgba(255,255,255,0)']}
+                    style={StyleSheet.absoluteFill}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 0.6 }}
                 />
+
+                {/* 2. Pattern Image Layer */}
+                <View style={[StyleSheet.absoluteFill, { opacity: 0.06 }]}>
+                    <Image
+                        source={require('../../assets/loadscreen/bgimage.jpg')}
+                        style={styles.patternImage}
+                        resizeMode="repeat"
+                    />
+                </View>
+
+                {/* 3. Bottom White Fade (Ensures content readability) */}
                 <LinearGradient
                     colors={['rgba(255,255,255,0)', '#FFFFFF']}
                     style={StyleSheet.absoluteFill}
                     start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 0.45 }}
+                    end={{ x: 0, y: 0.5 }}
                 />
             </View>
 
@@ -193,10 +200,9 @@ export const CustomerLoginScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.white,
     },
     patternContainer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         overflow: 'hidden',
     },
     patternImage: {

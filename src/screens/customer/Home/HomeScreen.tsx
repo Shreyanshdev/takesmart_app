@@ -244,7 +244,9 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
                             )}
 
                             {/* "Shop All Products" section title */}
-                            <SectionHeader title="Shop All Products" subtitle="Browse our entire collection" />
+                            {!isLoading && normalProducts.length > 0 && (
+                                <SectionHeader title="Shop All Products" subtitle="Browse our entire collection" />
+                            )}
 
                             {/* Initial Loading Skeletons */}
                             {isLoading && (
@@ -286,7 +288,7 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
                 </View>
             )}
 
-            <BrandFooter />
+            {!isLoading && <BrandFooter />}
         </View>
     ), [isLoadingMore, isLoading, normalProducts.length, isServiceAvailable]);
 
@@ -347,7 +349,6 @@ export const HomeScreen = ({ navigation }: HomeScreenProps) => {
                         progressViewOffset={dynamicPaddingTop}
                     />
                 }
-                estimatedItemSize={280}
             />
 
             <ProductDetailsModal

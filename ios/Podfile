@@ -1,5 +1,5 @@
 # Resolve react_native_pods.rb with node to allow for hoisting
-ENV['RCT_NEW_ARCH_ENABLED'] = '0'
+ENV['RCT_NEW_ARCH_ENABLED'] = '1'
 require Pod::Executable.execute_command('node', ['-p',
   'require.resolve(
     "react-native/scripts/react_native_pods.rb",
@@ -23,7 +23,7 @@ target 'takesmart' do
     # An absolute path to your application root.
     :app_path => "#{Pod::Config.instance.installation_root}/..",
     :hermes_enabled => true,
-    :fabric_enabled => false,
+    :fabric_enabled => true,
   )
 
   post_install do |installer|

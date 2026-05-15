@@ -12,7 +12,7 @@ import {
     PermissionsAndroid,
 } from 'react-native';
 import GetLocation from 'react-native-get-location';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../components/shared/SafeBlurView';
 import { StatusBar } from 'react-native';
 import Modal from 'react-native-modal';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';

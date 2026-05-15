@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, TextInput, ScrollView, Animated, StatusBar, Platform, ActivityIndicator, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../../components/shared/SafeBlurView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MonoText } from '../../../components/shared/MonoText';
 import { colors } from '../../../theme/colors';

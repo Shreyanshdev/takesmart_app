@@ -1,7 +1,7 @@
 import React, { ReactNode } from 'react';
 import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from './SafeBlurView';
 import Svg, { Path } from 'react-native-svg';
 import { MonoText } from './MonoText';
 import { colors } from '../../theme/colors';

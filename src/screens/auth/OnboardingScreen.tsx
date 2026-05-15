@@ -114,25 +114,31 @@ export const OnboardingScreen = () => {
 
     return (
         <View style={styles.rootContainer}>
-
-            {/* Background Layer - Dynamic Gradient */}
-            <LinearGradient
-                colors={GRADIENTS[currentIndex] || GRADIENTS[0]}
-                style={StyleSheet.absoluteFill}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 0.6 }}
-            />
-            <View style={styles.patternContainer}>
-                <Image
-                    source={require('../../assets/loadscreen/bgimage.jpg')}
-                    style={[styles.patternImage, { opacity: 0.1 }]}
-                    resizeMode="repeat"
+            {/* Background Layer */}
+            <View style={[StyleSheet.absoluteFill, { zIndex: -1 }]}>
+                {/* 1. Base Top Color Gradient */}
+                <LinearGradient
+                    colors={[GRADIENTS[currentIndex]?.[0] || '#DEFCE1', 'rgba(255,255,255,0)']}
+                    style={StyleSheet.absoluteFill}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 0.6 }}
                 />
+
+                {/* 2. Pattern Image Layer */}
+                <View style={[StyleSheet.absoluteFill, { opacity: 0.06 }]}>
+                    <Image
+                        source={require('../../assets/loadscreen/bgimage.jpg')}
+                        style={styles.patternImage}
+                        resizeMode="repeat"
+                    />
+                </View>
+
+                {/* 3. Bottom White Fade (Ensures content readability) */}
                 <LinearGradient
                     colors={['rgba(255,255,255,0)', '#FFFFFF']}
                     style={StyleSheet.absoluteFill}
                     start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 0.45 }}
+                    end={{ x: 0, y: 0.5 }}
                 />
             </View>
 
@@ -191,7 +197,7 @@ export const OnboardingScreen = () => {
                         </MonoText>
                     </TouchableOpacity>
                 </View>
-            </View>
+                </View>
         </View>
     );
 };
@@ -199,7 +205,6 @@ export const OnboardingScreen = () => {
 const styles = StyleSheet.create({
     rootContainer: {
         flex: 1,
-        backgroundColor: colors.white,
     },
     header: {
         position: 'absolute',
@@ -286,7 +291,7 @@ const styles = StyleSheet.create({
         backgroundColor: colors.primary,
     },
     patternContainer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         overflow: 'hidden',
     },
     patternImage: {

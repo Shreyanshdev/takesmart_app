@@ -3,7 +3,7 @@ import { View, StyleSheet, TouchableOpacity, ScrollView, Platform, Dimensions, A
 import { FlashList } from '@shopify/flash-list';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../../components/shared/SafeBlurView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MonoText } from '../../../components/shared/MonoText';
 import { colors } from '../../../theme/colors';
@@ -481,7 +481,6 @@ export const SubcategoriesScreen = () => {
                                 paddingTop: spacing.m,
                                 paddingBottom: 120
                             }}
-                            estimatedItemSize={260}
                             showsVerticalScrollIndicator={false}
                         />
                     ) : (
@@ -495,7 +494,6 @@ export const SubcategoriesScreen = () => {
                                 paddingTop: spacing.m,
                                 paddingBottom: 120
                             }}
-                            estimatedItemSize={260}
                             showsVerticalScrollIndicator={false}
                             onEndReached={loadMoreProducts}
                             onEndReachedThreshold={0.5}

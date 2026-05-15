@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, ScrollView, Platform, Dimensions, ImageBackground } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from './SafeBlurView';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { SkeletonItem } from './SkeletonLoader';
 import { StripCardSkeleton } from '../home/HomeSkeletons';

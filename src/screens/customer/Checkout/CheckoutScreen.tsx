@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, JSX } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert, Platform, ActivityIndicator, Image, FlatList, Modal } from 'react-native';
 // @ts-ignore
 import debounce from 'lodash.debounce';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect, CommonActions } from '@react-navigation/native';
 import Svg, { Path, Circle, Line, Rect } from 'react-native-svg';
 // @ts-ignore
 import RazorpayCheckout from 'react-native-razorpay';
@@ -98,6 +98,14 @@ export const CheckoutScreen = () => {
     const [stockErrors, setStockErrors] = useState<Record<string, { status: string, message: string, available: number }>>({});
     const [hasCriticalStockIssue, setHasCriticalStockIssue] = useState(false);
 
+    const safeGoBack = React.useCallback(() => {
+        if (navigation.canGoBack()) {
+            navigation.goBack();
+        } else {
+            navigation.navigate('MainTabs');
+        }
+    }, [navigation]);
+
     // Order Success Modal State
     const [successModalVisible, setSuccessModalVisible] = useState(false);
     const [modalConfig, setModalConfig] = useState<{
@@ -139,6 +147,16 @@ export const CheckoutScreen = () => {
     );
 
     const insets = useSafeAreaInsets();
+    
+    // Robust helper to reset stack and go to Home
+    const resetToHome = useCallback(() => {
+        navigation.dispatch(
+            CommonActions.reset({
+                index: 0,
+                routes: [{ name: 'MainTabs' }],
+            })
+        );
+    }, [navigation]);
 
     // Function to validate stock for all items in cart
     const validateStock = async (forceAlert = false) => {
@@ -330,7 +348,7 @@ export const CheckoutScreen = () => {
     // Handle back without address selection (goes back to previous screen)
     const handleBackWithoutSelection = () => {
         setAddressModalVisible(false);
-        navigation.goBack();
+        safeGoBack();
     };
 
     // Handle cancel - just close modal, keep existing address
@@ -584,7 +602,7 @@ export const CheckoutScreen = () => {
                         onSecondaryPress: () => {
                             clearCart(); // Clear cart here
                             setSuccessModalVisible(false);
-                            navigation.navigate('Home');
+                            resetToHome();
                         },
                     });
                     // Use setTimeout to ensure config is set before showing modal
@@ -608,6 +626,7 @@ export const CheckoutScreen = () => {
                         primaryButtonText: 'Continue Shopping',
                         onPrimaryPress: () => {
                             setSuccessModalVisible(false);
+                            resetToHome();
                         },
                     });
                     setSuccessModalVisible(true);
@@ -708,7 +727,7 @@ export const CheckoutScreen = () => {
                 onSecondaryPress: () => {
                     clearCart(); // Clear cart here
                     setSuccessModalVisible(false);
-                    navigation.navigate('Home');
+                    resetToHome();
                 },
             });
             // Use setTimeout to ensure config is set before showing modal
@@ -898,7 +917,7 @@ export const CheckoutScreen = () => {
                 <MonoText color={colors.textLight} style={{ textAlign: 'center', marginBottom: 24 }}>
                     We can't take your order as we are not shipping in your area. We will be coming soon! Stay updated and thanks for coming!
                 </MonoText>
-                <TouchableOpacity style={styles.payBtn} onPress={() => navigation.navigate('Home')}>
+                <TouchableOpacity style={styles.payBtn} onPress={resetToHome}>
                     <MonoText weight="bold" color={colors.white}>Go Back Home</MonoText>
                 </TouchableOpacity>
             </SafeAreaView>
@@ -947,7 +966,7 @@ export const CheckoutScreen = () => {
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={styles.outOfRangeSecondaryBtn}
-                        onPress={() => navigation.navigate('Home')}
+                        onPress={resetToHome}
                     >
                         <MonoText weight="bold" color={colors.text}>Go Back Home</MonoText>
                     </TouchableOpacity>
@@ -969,25 +988,37 @@ export const CheckoutScreen = () => {
     // Empty cart
     if (displayItems.length === 0) {
         return (
-            <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: spacing.xl }]}>
-                <Svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 24 }}>
-                    <Circle cx="9" cy="21" r="1" />
-                    <Circle cx="20" cy="21" r="1" />
-                    <Path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
-                </Svg>
-                <MonoText size="l" weight="bold" style={{ textAlign: 'center', marginBottom: 12 }}>
-                    Your cart is empty
-                </MonoText>
-                <MonoText color={colors.textLight} style={{ textAlign: 'center', marginBottom: 32, paddingHorizontal: 20 }}>
-                    Add products to continue checkout. Browse our fresh dairy products and start your order!
-                </MonoText>
-                <TouchableOpacity
-                    style={styles.emptyCartBtn}
-                    onPress={() => navigation.navigate('Categories')}
-                >
-                    <MonoText weight="bold" color={colors.text} size="s">Add Products</MonoText>
-                </TouchableOpacity>
-            </SafeAreaView>
+            <View style={styles.container}>
+                {/* Header for Empty State */}
+                <View style={[styles.header, { paddingTop: insets.top }]}>
+                    <TouchableOpacity onPress={safeGoBack} style={styles.backBtn}>
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
+                            <Path d="M19 12H5M12 19l-7-7 7-7" />
+                        </Svg>
+                    </TouchableOpacity>
+                    <MonoText size="l" weight="bold">Checkout</MonoText>
+                </View>
+
+                <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: spacing.xl }]}>
+                    <Svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke={colors.textLight} strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 24 }}>
+                        <Circle cx="9" cy="21" r="1" />
+                        <Circle cx="20" cy="21" r="1" />
+                        <Path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+                    </Svg>
+                    <MonoText size="l" weight="bold" style={{ textAlign: 'center', marginBottom: 12 }}>
+                        Your cart is empty
+                    </MonoText>
+                    <MonoText color={colors.textLight} style={{ textAlign: 'center', marginBottom: 32, paddingHorizontal: 20 }}>
+                        Add products to continue checkout. Browse our fresh dairy products and start your order!
+                    </MonoText>
+                    <TouchableOpacity
+                        style={styles.emptyCartBtn}
+                        onPress={() => navigation.navigate('Categories')}
+                    >
+                        <MonoText weight="bold" color={colors.text} size="s">Add Products</MonoText>
+                    </TouchableOpacity>
+                </View>
+            </View>
         );
     }
 
@@ -995,7 +1026,7 @@ export const CheckoutScreen = () => {
         <View style={styles.container}>
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                <TouchableOpacity onPress={safeGoBack} style={styles.backBtn}>
                     <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.black} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <Path d="M19 12H5M12 19l-7-7 7-7" />
                     </Svg>
@@ -1050,7 +1081,6 @@ export const CheckoutScreen = () => {
                             showsHorizontalScrollIndicator={false}
                             keyExtractor={(p: any) => `${p._id}_${p.inventoryId}`}
                             contentContainerStyle={{ paddingRight: spacing.l }}
-                            estimatedItemSize={147}
                             nestedScrollEnabled={true}
                             directionalLockEnabled={true}
                             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
@@ -1075,7 +1105,7 @@ export const CheckoutScreen = () => {
                             <View style={{ flex: 1, height: 1.5, backgroundColor: colors.border, opacity: 0.6 }} />
                             <TouchableOpacity
                                 style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 16 }}
-                                onPress={() => navigation.goBack()}
+                                onPress={safeGoBack}
                             >
                                 <MonoText size="s" weight="bold" color={colors.primary} style={{ textDecorationLine: 'underline' }}>
                                     Something still left? Add now
@@ -2154,7 +2184,7 @@ const styles = StyleSheet.create({
         }),
     },
     validationBlocker: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 150,
         backgroundColor: 'transparent',
     },

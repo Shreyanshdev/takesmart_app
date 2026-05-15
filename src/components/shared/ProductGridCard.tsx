@@ -4,9 +4,9 @@ import {
     StyleSheet,
     TouchableOpacity,
     Dimensions,
-    Platform
+    Platform,
+    Image
 } from 'react-native';
-import FastImage from 'react-native-fast-image';
 import Svg, { Path } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { MonoText } from './MonoText';
@@ -118,14 +118,10 @@ const ProductGridCardComponent: React.FC<ProductGridCardProps> = ({
             {/* Image Container with Neoglassmorphism Effect */}
             <View style={styles.imageContainer}>
                 {productImage ? (
-                    <FastImage
-                        source={{
-                            uri: productImage,
-                            priority: FastImage.priority.normal,
-                            cache: FastImage.cacheControl.immutable
-                        }}
+                    <Image
+                        source={{ uri: productImage }}
                         style={styles.productImage}
-                        resizeMode={FastImage.resizeMode.contain}
+                        resizeMode="contain"
                     />
                 ) : (
                     <View style={[styles.productImage, styles.placeholderImage]}>

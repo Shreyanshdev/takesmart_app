@@ -5,7 +5,7 @@ import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
 import { MonoText } from '../shared/MonoText';
 import { PartnerOrder } from '../../types/partner';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../shared/SafeBlurView';
 
 interface ActiveOrderCardProps {
     order: PartnerOrder;

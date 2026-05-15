@@ -1,6 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Platform, Dimensions } from 'react-native';
-import FastImage from 'react-native-fast-image';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Platform, Dimensions, Image } from 'react-native';
 import { MonoText } from '../shared/MonoText';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
@@ -103,10 +102,10 @@ export const BrandSpotlight = ({
                 <View style={styles.brandHeader}>
                     <View style={styles.logoSlot}>
                         {brandLogo && (
-                            <FastImage
+                            <Image
                                 source={{ uri: brandLogo }}
                                 style={styles.brandLogo}
-                                resizeMode={FastImage.resizeMode.contain}
+                                resizeMode="contain"
                             />
                         )}
                     </View>

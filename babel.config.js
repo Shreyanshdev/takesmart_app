@@ -7,6 +7,6 @@ module.exports = {
       safe: false,
       allowUndefined: true,
     }],
-    'react-native-reanimated/plugin', // Must be last
+    'react-native-worklets/plugin', // Required for Reanimated 4.x - must be last
   ],
 };

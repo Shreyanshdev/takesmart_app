@@ -10,8 +10,8 @@ import {
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import { BlurView } from '@react-native-community/blur';
+import { useNavigation, CommonActions } from '@react-navigation/native';
+import { SafeBlurView as BlurView } from '../../components/shared/SafeBlurView';
 import Svg, { Path } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { MonoText } from '../../components/shared/MonoText';
@@ -120,7 +120,6 @@ export const WishlistScreen = () => {
     const totalItemsCount = items.reduce((sum, item) => sum + item.quantity, 0);
     const cartTotal = getTotalPrice();
 
-    const FlashListOptimized = FlashList as any;
 
     return (
         <View style={styles.container}>
@@ -135,11 +134,13 @@ export const WishlistScreen = () => {
                     reducedTransparencyFallbackColor="white"
                 />
                 <View style={styles.headerContent}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
-                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
-                            <Path d="M19 12H5M12 19l-7-7 7-7" />
-                        </Svg>
-                    </TouchableOpacity>
+                    {navigation.canGoBack() && (
+                        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
+                            <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
+                                <Path d="M19 12H5M12 19l-7-7 7-7" />
+                            </Svg>
+                        </TouchableOpacity>
+                    )}
 
                     <MonoText size="l" weight="bold" style={styles.headerTitle}>
                         My Wishlist
@@ -169,7 +170,7 @@ export const WishlistScreen = () => {
                 </ScrollView>
             ) : (
                 <View style={{ flex: 1, paddingHorizontal: 6 }}>
-                    <FlashListOptimized
+                    <FlashList
                         data={wishlist}
                         keyExtractor={(item: any, index: number) => `${item._id}_${item.inventoryId || index}`}
                         numColumns={2}
@@ -181,7 +182,7 @@ export const WishlistScreen = () => {
                         ]}
                         renderItem={renderProductCard}
                         showsVerticalScrollIndicator={false}
-                        estimatedItemSize={280}
+
                         ListHeaderComponent={<View style={{ height: 12 }} />}
                         ListEmptyComponent={
                             <Animated.View entering={FadeInUp} style={styles.emptyContainer}>
@@ -193,7 +194,14 @@ export const WishlistScreen = () => {
                                 </MonoText>
                                 <TouchableOpacity
                                     style={styles.browseBtn}
-                                    onPress={() => navigation.navigate('Home')}
+                                onPress={() => {
+                                    navigation.dispatch(
+                                        CommonActions.reset({
+                                            index: 0,
+                                            routes: [{ name: 'MainTabs' }],
+                                        })
+                                    );
+                                }}
                                 >
                                     <MonoText size="s" weight="bold" color={colors.white}>Start Shopping</MonoText>
                                 </TouchableOpacity>

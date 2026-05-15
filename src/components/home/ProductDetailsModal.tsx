@@ -8,7 +8,6 @@ import {
     Dimensions,
     ScrollView,
     FlatList,
-    LayoutAnimation,
     UIManager,
     Platform,
     ActivityIndicator,
@@ -20,9 +19,11 @@ import Animated, {
     useAnimatedStyle,
     withSpring,
     withSequence,
+    FadeInDown,
+    FadeOutUp,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../shared/SafeBlurView';
 import { colors } from '../../theme/colors';
 import { MonoText } from '../shared/MonoText';
 import Svg, { Path, Line, Circle } from 'react-native-svg';
@@ -41,9 +42,6 @@ import { StripProductCard } from './ProductStrip';
 import { SuccessToast } from '../SuccessToast';
 import { logger } from '../../utils/logger';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-    UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 const { width, height } = Dimensions.get('window');
 
@@ -741,7 +739,6 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                 <TouchableOpacity
                                     style={styles.detailsToggle}
                                     onPress={() => {
-                                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                                         setShowDetails(!showDetails);
                                     }}
                                 >
@@ -754,7 +751,7 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                             )}
 
                             {showDetails && (
-                                <View style={styles.detailsExpanded}>
+                                <Animated.View entering={FadeInDown} exiting={FadeOutUp} style={styles.detailsExpanded}>
                                     {currentProduct.description && (
                                         <View style={styles.detailBlock}>
                                             <MonoText size="s" weight="bold" style={styles.detailLabel}>Description</MonoText>
@@ -767,7 +764,7 @@ export const ProductDetailsModal = ({ visible, product, initialVariantId, onClos
                                             <MonoText size="s" color={colors.textLight} style={styles.detailValue}>{String(attr.value)}</MonoText>
                                         </View>
                                     ))}
-                                </View>
+                                </Animated.View>
                             )}
 
                             {/* More from this Subcategory */}
@@ -1139,7 +1136,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     backdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
     modalContent: {
         flex: 1,
@@ -1560,13 +1557,13 @@ const styles = StyleSheet.create({
         backgroundColor: '#FEF3C7',
     },
     viewerOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(0,0,0,0.85)',
         justifyContent: 'center',
         alignItems: 'center',
     },
     viewerBackdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
     viewerContent: {
         width,

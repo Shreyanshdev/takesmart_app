@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, TextInput, Platform, Alert, Keyboard, Modal, Animated, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../shared/SafeBlurView';
 import { MonoText } from '../shared/MonoText';
 import { SkeletonItem } from '../shared/SkeletonLoader';
 import { colors } from '../../theme/colors';

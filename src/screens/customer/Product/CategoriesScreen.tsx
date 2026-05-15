@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import Svg, { Circle, Line, Path, Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from 'react-native-svg';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../../components/shared/SafeBlurView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
     FadeIn,
@@ -53,11 +53,13 @@ const CategoriesHeader = ({ navigation }: { navigation: any }) => {
     return (
         <View style={[styles.headerContainer, { height: headerHeight, paddingTop: insets.top }]}>
             <View style={styles.headerContent}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <Path d="M19 12H5M12 19l-7-7 7-7" />
-                    </Svg>
-                </TouchableOpacity>
+                {navigation.canGoBack() && (
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <Path d="M19 12H5M12 19l-7-7 7-7" />
+                        </Svg>
+                    </TouchableOpacity>
+                )}
                 <MonoText size="l" weight="bold" color={colors.text} style={styles.headerTitle}>
                     Explore Categories
                 </MonoText>

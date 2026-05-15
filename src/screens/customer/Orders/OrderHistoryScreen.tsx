@@ -1,15 +1,18 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, FlatList, Platform, Animated, StatusBar } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, Platform, Animated, StatusBar } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, CommonActions } from '@react-navigation/native';
 import Svg, { Path, Polyline } from 'react-native-svg';
 import { colors } from '../../../theme/colors';
 import { MonoText } from '../../../components/shared/MonoText';
 import { api } from '../../../services/core/api';
 import { useAuthStore } from '../../../store/authStore';
 import { logger } from '../../../utils/logger';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../../components/shared/SafeBlurView';
 import { SkeletonItem } from '../../../components/shared/SkeletonLoader';
+import { FloatingCarts } from '../../../components/home/FloatingCarts';
+import { useHomeStore } from '../../../store/home.store';
 
 const HEADER_CONTENT_HEIGHT = 56;
 
@@ -71,6 +74,13 @@ export const OrderHistoryScreen = () => {
     const navigation = useNavigation<any>();
     const insets = useSafeAreaInsets();
     const { user } = useAuthStore();
+    const setTabBarVisible = useHomeStore(state => state.setTabBarVisible);
+
+    useFocusEffect(
+        useCallback(() => {
+            setTabBarVisible(true);
+        }, [setTabBarVisible])
+    );
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [orders, setOrders] = useState<any[]>([]);
@@ -318,11 +328,13 @@ export const OrderHistoryScreen = () => {
                     reducedTransparencyFallbackColor="white"
                 />
                 <View style={styles.headerContent}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                        <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
-                            <Path d="M19 12H5M12 19l-7-7 7-7" />
-                        </Svg>
-                    </TouchableOpacity>
+                    {navigation.canGoBack() && (
+                        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                            <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={colors.text} strokeWidth="2">
+                                <Path d="M19 12H5M12 19l-7-7 7-7" />
+                            </Svg>
+                        </TouchableOpacity>
+                    )}
                     <MonoText size="l" weight="bold" style={styles.headerTitle}>My Orders</MonoText>
                     <View style={{ width: 40 }} />
                 </View>
@@ -330,7 +342,7 @@ export const OrderHistoryScreen = () => {
 
             {/* Orders List */}
             <View style={styles.listWrapper}>
-                <FlatList
+                <FlashList
                     data={orders}
                     renderItem={renderOrderItem}
                     keyExtractor={(item) => item._id}
@@ -359,7 +371,14 @@ export const OrderHistoryScreen = () => {
                             </MonoText>
                             <TouchableOpacity
                                 style={styles.shopNowBtn}
-                                onPress={() => navigation.navigate('Home')}
+                                onPress={() => {
+                                    navigation.dispatch(
+                                        CommonActions.reset({
+                                            index: 0,
+                                            routes: [{ name: 'MainTabs' }],
+                                        })
+                                    );
+                                }}
                             >
                                 <MonoText weight="bold" color={colors.white}>Shop Now</MonoText>
                             </TouchableOpacity>
@@ -367,6 +386,7 @@ export const OrderHistoryScreen = () => {
                     }
                 />
             </View>
+            <FloatingCarts showWithTabBar={true} />
         </View>
     );
 };

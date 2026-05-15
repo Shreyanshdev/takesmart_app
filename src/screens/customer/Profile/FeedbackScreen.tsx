@@ -3,7 +3,7 @@ import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, Activ
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Svg, { Path, Line } from 'react-native-svg';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../../components/shared/SafeBlurView';
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';
 import { MonoText } from '../../../components/shared/MonoText';

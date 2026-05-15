@@ -14,7 +14,7 @@ export const TabNavigator = () => {
             tabBar={(props) => <CollapsibleTabBar {...props} />}
             screenOptions={{
                 headerShown: false,
-                freezeOnBlur: false,
+                freezeOnBlur: true,
             }}
         >
             <Tab.Screen name="Home" component={HomeScreen} />

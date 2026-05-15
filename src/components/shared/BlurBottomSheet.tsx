@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, Modal, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from './SafeBlurView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';
@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
         right: 0,
     },
     overlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
     content: {
         position: 'absolute',

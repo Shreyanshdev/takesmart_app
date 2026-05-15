@@ -11,7 +11,7 @@ import {
     KeyboardAvoidingView,
 } from 'react-native';
 import Svg, { Path, Line, Circle } from 'react-native-svg';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from './SafeBlurView';
 import { MonoText } from './MonoText';
 import { colors } from '../../theme/colors';
 import { spacing } from '../../theme/spacing';

@@ -1,19 +1,27 @@
 pluginManagement {
+    includeBuild("../node_modules/@react-native/gradle-plugin")
     repositories {
         google()
         mavenCentral()
         gradlePluginPortal()
     }
-    includeBuild("../node_modules/@react-native/gradle-plugin")
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == 'com.android.library') {
+                useModule("com.android.tools.build:gradle:${requested.version}")
+            }
+            if (requested.id.id == 'com.android.application') {
+                useModule("com.android.tools.build:gradle:${requested.version}")
+            }
+        }
+    }
 }
 
 plugins {
     id("com.facebook.react.settings")
-    id("com.facebook.react.rootproject") apply false
 }
-
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> 
-    ex.autolinkLibrariesFromCommand(["npx", "react-native", "config"], file('..')) 
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex ->
+    ex.autolinkLibrariesFromCommand(["npx", "react-native", "config"], file('..'))
 }
 rootProject.name = 'TakeSmart'
 include ':app'

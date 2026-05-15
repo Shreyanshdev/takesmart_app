@@ -7,9 +7,9 @@ import {
     TouchableOpacity,
     NativeSyntheticEvent,
     NativeScrollEvent,
-    Platform
+    Platform,
+    Image
 } from 'react-native';
-import FastImage from 'react-native-fast-image';
 import { useNavigation } from '@react-navigation/native';
 import LinearGradient from 'react-native-linear-gradient';
 import { MonoText } from '../shared/MonoText';
@@ -113,13 +113,13 @@ export const PromoCarousel = ({ slides, height = 180, interval = 4000, isEdgeToE
                 isEdgeToEdge && { borderRadius: 0 } // Remove border radius for edge-to-edge
             ]}
         >
-            <FastImage
-                source={{ uri: item.imageUrl, priority: FastImage.priority.high }}
+            <Image
+                source={{ uri: item.imageUrl }}
                 style={[
                     styles.image,
                     isEdgeToEdge && { borderRadius: 0 }
                 ]}
-                resizeMode={FastImage.resizeMode.cover}
+                resizeMode="cover"
             />
             {/* Bottom gradient for text readability */}
             {(item.title || item.buttonText) && (

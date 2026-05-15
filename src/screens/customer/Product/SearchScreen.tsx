@@ -13,7 +13,7 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../../components/shared/SafeBlurView';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
 import { MonoText } from '../../../components/shared/MonoText';
 import { colors } from '../../../theme/colors';
@@ -209,8 +209,6 @@ export const SearchScreen = () => {
         );
     }, [getItemQuantity, handleProductPress, handleAddToCart, removeFromCart]);
 
-    // 0. Typed FlashList alias for TS
-    const FlashListOptimized = FlashList as any;
 
     // 1. Initial State -> Trending Grid
     const renderInitialState = () => (
@@ -229,12 +227,12 @@ export const SearchScreen = () => {
                     ))}
                 </View>
             ) : (
-                <FlashListOptimized
+                <FlashList
                     data={trendingProducts}
                     renderItem={renderProductItem}
                     keyExtractor={(item: any, index: number) => `${item._id}_${item.inventoryId || index}`}
                     numColumns={2}
-                    estimatedItemSize={280}
+
                     scrollEnabled={false}
                 />
             )}
@@ -285,12 +283,12 @@ export const SearchScreen = () => {
                     <MonoText size="s" color={colors.textLight} style={{ marginTop: 4 }}>Try a different search term</MonoText>
                 </View>
             ) : (
-                <FlashListOptimized
+                <FlashList
                     data={filteredProducts}
                     renderItem={renderProductItem}
                     keyExtractor={(item: any, index: number) => `${item._id}_${item.inventoryId || index}`}
                     numColumns={2}
-                    estimatedItemSize={280}
+
                     scrollEnabled={false}
                 />
             )}

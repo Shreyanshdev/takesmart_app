@@ -51,14 +51,13 @@ export const useHomeStore = create<HomeState>((set, get) => ({
 
     // Dynamic Home Layout
     homeLayoutSections: [],
-    isLayoutLoading: false,
+    isLayoutLoading: true,
 
     // Pagination state
     nextCursor: null,
     hasMore: true,
     isLoadingMore: false,
-
-    isLoading: false,
+    isLoading: true,
     error: null,
 
     setLocationHeaderVisible: (visible) => set({ isLocationHeaderVisible: visible }),
@@ -71,11 +70,7 @@ export const useHomeStore = create<HomeState>((set, get) => ({
 
     fetchHomeData: async () => {
         const hasData = get().categories.length > 0;
-        if (!hasData) {
-            set({ isLoading: true, error: null });
-        } else {
-            set({ error: null });
-        }
+        set({ isLoading: !hasData, error: null });
 
         try {
             // Get current branch for location-based pricing

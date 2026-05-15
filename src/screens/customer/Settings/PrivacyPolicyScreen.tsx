@@ -11,7 +11,7 @@ import {
 import Svg, { Path, Circle, Line } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../../components/shared/SafeBlurView';
 import { MonoText } from '../../../components/shared/MonoText';
 import { colors } from '../../../theme/colors';
 import { spacing } from '../../../theme/spacing';

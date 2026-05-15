@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../components/shared/SafeBlurView';
 import LinearGradient from 'react-native-linear-gradient';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { colors } from '../../theme/colors';
@@ -62,17 +62,18 @@ export const CompleteProfileScreen = () => {
 
     return (
         <View style={styles.container}>
-            {/* Background Gradient */}
-            <LinearGradient
-                colors={['#FFFFFF', '#FFF4E6', '#FFFFFF']}
-                style={styles.gradient}
-                start={{ x: 0.5, y: 0 }}
-                end={{ x: 0.5, y: 1 }}
-            />
-
-            {/* Decorative Blur Circles */}
-            <View style={[styles.blurCircle, styles.blurCircle1]} />
-            <View style={[styles.blurCircle, styles.blurCircle2]} />
+            {/* Background Layer */}
+            <View style={[StyleSheet.absoluteFill, { zIndex: -1 }]}>
+                <LinearGradient
+                    colors={['#FFFFFF', '#FFF4E6', '#FFFFFF']}
+                    style={styles.gradient}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                />
+                {/* Decorative Blur Circles */}
+                <View style={[styles.blurCircle, styles.blurCircle1]} />
+                <View style={[styles.blurCircle, styles.blurCircle2]} />
+            </View>
 
             <SafeAreaView style={styles.safeArea}>
                 <KeyboardAvoidingView
@@ -215,7 +216,7 @@ const styles = StyleSheet.create({
         backgroundColor: colors.secondary,
     },
     gradient: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
     safeArea: {
         flex: 1,

@@ -3,7 +3,7 @@ import { View, StyleSheet, TextInput, TouchableOpacity, Platform, KeyboardAvoidi
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import Animated, { useAnimatedStyle, useSharedValue, withSequence, withTiming, withRepeat } from 'react-native-reanimated';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../components/shared/SafeBlurView';
 import LinearGradient from 'react-native-linear-gradient';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
@@ -91,14 +91,14 @@ export const OTPScreen = () => {
             const { storage } = require('../../services/core/storage');
             await storage.setUser(userProfile);
 
+            // Update Auth State - This will trigger RootNavigator to switch to MainTabs automatically
             useAuthStore.getState().login(userProfile);
 
+            // For new users without a name, navigate to CompleteProfile after the stack switch
             if (!userProfile.name) {
-                navigation.replace('CompleteProfile');
-            } else {
-                const { useBranchStore } = require('../../store/branch.store');
-                useBranchStore.getState().setShouldShowAddressModal(true);
-                navigation.replace('MainTabs', { screen: 'Home' });
+                setTimeout(() => {
+                    navigation.navigate('CompleteProfile');
+                }, 500);
             }
         } catch (err: any) {
             setError(err.response?.data?.message || 'Invalid OTP. Please try again.');
@@ -133,25 +133,27 @@ export const OTPScreen = () => {
     return (
         <View style={styles.container}>
 
-            {/* Background Layer - Branded Theme */}
-            <LinearGradient
-                colors={['#DEFCE1', '#FFFFFF']}
-                style={StyleSheet.absoluteFill}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 0.6 }}
-            />
-            <View style={styles.patternContainer}>
-                <Image
-                    source={require('../../assets/loadscreen/bgimage.jpg')}
-                    style={[styles.patternImage, { opacity: 0.1 }]}
-                    resizeMode="repeat"
-                />
+            {/* Background Layer */}
+            <View style={[StyleSheet.absoluteFill, { zIndex: -1 }]}>
                 <LinearGradient
-                    colors={['rgba(255,255,255,0)', '#FFFFFF']}
+                    colors={['#DEFCE1', '#FFFFFF']}
                     style={StyleSheet.absoluteFill}
                     start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 0.45 }}
+                    end={{ x: 0, y: 0.6 }}
                 />
+                <View style={styles.patternContainer}>
+                    <Image
+                        source={require('../../assets/loadscreen/bgimage.jpg')}
+                        style={[styles.patternImage, { opacity: 0.1 }]}
+                        resizeMode="repeat"
+                    />
+                    <LinearGradient
+                        colors={['rgba(255,255,255,0)', '#FFFFFF']}
+                        style={StyleSheet.absoluteFill}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 0, y: 0.45 }}
+                    />
+                </View>
             </View>
 
             <KeyboardAvoidingView
@@ -259,7 +261,7 @@ const styles = StyleSheet.create({
         backgroundColor: colors.white,
     },
     patternContainer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         overflow: 'hidden',
     },
     patternImage: {

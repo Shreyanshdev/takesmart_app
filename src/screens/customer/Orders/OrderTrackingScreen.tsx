@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, Alert, Linking, Platform, ScrollView, Image, StatusBar } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing, interpolate } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
 import MapView, { Marker, Polyline as MapPolyline, PROVIDER_DEFAULT, AnimatedRegion } from 'react-native-maps';
 import Svg, { Path, Circle, Polyline as SvgPolyline } from 'react-native-svg';
 import { io, Socket } from 'socket.io-client';
@@ -18,7 +18,7 @@ import { notifyOrderPickedUp, notifyOrderDelivered } from '../../../services/not
 import { logger } from '../../../utils/logger';
 import { RatingModal } from '../../../components/shared/RatingModal';
 import { reviewService, Review } from '../../../services/customer/review.service';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from '../../../components/shared/SafeBlurView';
 import { TrackingSkeleton } from '../../../components/shared/TrackingSkeleton';
 
 const { width, height } = Dimensions.get('window');
@@ -557,7 +557,12 @@ export const OrderTrackingScreen = () => {
                     <TouchableOpacity
                         onPress={() => {
                             if (from === 'checkout') {
-                                navigation.navigate('MainTabs', { screen: 'Home' });
+                                navigation.dispatch(
+                                    CommonActions.reset({
+                                        index: 0,
+                                        routes: [{ name: 'MainTabs' }],
+                                    })
+                                );
                             } else {
                                 navigation.goBack();
                             }

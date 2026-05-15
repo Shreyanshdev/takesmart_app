@@ -108,7 +108,7 @@ export const RootNavigator = () => {
                     headerShown: false,
                     cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
                     gestureEnabled: true,
-                    freezeOnBlur: false,
+                    freezeOnBlur: true,
                     cardStyle: { backgroundColor: colors.white },
                 }}
             >

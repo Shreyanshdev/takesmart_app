@@ -8,7 +8,7 @@ import Animated, {
     withSequence,
     runOnJS,
 } from 'react-native-reanimated';
-import { BlurView } from '@react-native-community/blur';
+import { SafeBlurView as BlurView } from './shared/SafeBlurView';
 import Svg, { Path, Circle, Line } from 'react-native-svg';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
